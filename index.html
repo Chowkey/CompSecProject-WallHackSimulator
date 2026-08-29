@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Client Integrity Sandbox</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!--
+  Client Integrity Sandbox - an educational simulation.
+
+  Everything on this page is code written by this project: the game, the
+  authoritative server, and the simulated cheat. Nothing here targets, or is
+  usable against, any real software.
+
+  Only three scripts are loaded directly. hash.js, kernel.js and main.js form
+  the loader, and a loader cannot verify itself - so they are trusted by
+  assumption, which is exactly the point Defense 4 makes. main.js fetches every
+  other module, checks its signature against manifest.json, and executes only
+  what verifies. attacker.js is loaded last, after verification has finished.
+-->
+
+<div id="app">
+
+  <header id="topbar">
+    <div>
+      <h1>Client Integrity Sandbox</h1>
+      <p class="subtitle">Five anti-cheat techniques, their bypasses, and the architectural
+        decision that outperforms all of them</p>
+    </div>
+    <div id="env-line" class="env"></div>
+  </header>
+
+  <div id="boot-error" class="boot-error"></div>
+  <div id="banner" class="banner"></div>
+
+  <section id="controls">
+    <div class="control-group">
+      <label for="seed-input">Seed</label>
+      <input id="seed-input" type="text" value="valorant" size="10">
+      <button id="random-seed" title="New random seed">⟳</button>
+      <button id="reset-btn">Reset</button>
+    </div>
+
+    <div class="control-group">
+      <button id="play-btn">▶ Play</button>
+      <button id="step-btn" title="Advance exactly one tick (.)">Step</button>
+      <label for="speed-select">Speed</label>
+      <select id="speed-select">
+        <option value="0.25">0.25×</option>
+        <option value="0.5">0.5×</option>
+        <option value="1" selected>1×</option>
+        <option value="2">2×</option>
+        <option value="4">4×</option>
+      </select>
+    </div>
+
+    <div class="control-group">
+      <label for="culling-select">Culling</label>
+      <select id="culling-select">
+        <option value="NONE">NONE — send everything</option>
+        <option value="STRICT">STRICT — line of sight only</option>
+        <option value="BUFFERED" selected>BUFFERED — +300ms lookahead</option>
+      </select>
+      <button id="culling-help" class="help-btn" title="What these modes model">?</button>
+    </div>
+
+    <div class="control-group">
+      <label for="attacker-select">Attacker</label>
+      <select id="attacker-select">
+        <option value="0" selected>off</option>
+        <option value="1">1 — passive read</option>
+        <option value="2">2 — wallhack</option>
+        <option value="3">3 — evasive</option>
+      </select>
+    </div>
+
+    <div class="control-group">
+      <label for="overhead-range" title="Extra time the cheat spends answering a challenge">
+        Bypass overhead</label>
+      <input id="overhead-range" type="range" min="0" max="50" step="1" value="0">
+      <span id="overhead-value" class="mono">0 ms</span>
+    </div>
+
+    <div class="control-group">
+      <label class="inline"><input id="timing-box" type="checkbox" checked> TIMING_ANALYSIS</label>
+    </div>
+
+    <div class="control-group grow">
+      <button id="export-btn">Export session</button>
+      <label for="bench-ticks">ticks/combo</label>
+      <input id="bench-ticks" type="number" value="500" min="50" step="50" size="5">
+      <button id="bench-btn">Run benchmark</button>
+      <button id="bench-cancel" disabled>Cancel</button>
+    </div>
+
+    <div id="bench-progress" class="bench-progress">
+      <div class="bench-track"><div id="bench-bar" class="bench-bar"></div></div>
+      <span id="bench-label" class="mono"></span>
+    </div>
+  </section>
+
+  <main id="stage">
+    <section id="game-pane">
+      <canvas id="game-canvas" width="800" height="600"></canvas>
+      <p id="game-caption" class="mono caption">waiting for the server…</p>
+      <p class="hint">Move with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or the arrow keys ·
+        <kbd>Space</kbd> play/pause · <kbd>.</kbd> single step</p>
+    </section>
+
+    <aside id="side">
+      <section id="minimap-pane">
+        <h2>Minimap — fog of war</h2>
+        <canvas id="minimap-canvas" width="320" height="240"></canvas>
+        <ul id="legend" class="legend"></ul>
+        <div id="leak-readout" class="readout"></div>
+      </section>
+
+      <section id="defense-pane">
+        <h2>Defense panel</h2>
+        <div id="defense-list"></div>
+        <p class="hint">Each row: enable the check, then arm its bypass. Bypasses take effect
+          at attacker level 3.</p>
+      </section>
+    </aside>
+  </main>
+
+  <section id="terminal-pane">
+    <div id="terminal-toolbar">
+      <strong>Terminal</strong>
+      <div id="terminal-filters" class="filters"></div>
+      <label class="inline"><input id="autoscroll-box" type="checkbox" checked> autoscroll</label>
+      <button id="clear-log">Clear</button>
+    </div>
+    <div id="terminal" class="terminal"></div>
+  </section>
+
+  <section id="conclusion" class="conclusion"></section>
+
+  <footer class="footer">
+    Educational simulation for an information-security course. Every technique operates only on
+    objects this project created. Reference architecture: Riot Games’ Vanguard (client) and
+    VALORANT’s Fog of War (server) — see <code>docs/references.md</code>.
+  </footer>
+</div>
+
+<div id="modal" class="modal">
+  <div class="modal-box">
+    <button id="modal-close" class="modal-close" title="Close (Esc)">×</button>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<script src="src/hash.js"></script>
+<script src="src/kernel.js"></script>
+<script src="src/main.js"></script>
+</body>
+</html>
