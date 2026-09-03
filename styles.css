@@ -469,9 +469,9 @@ kbd {
 
 /* --- watch panel: the raw values behind each verdict ---------------------- */
 
-.watch { display: none; max-height: 300px; overflow-y: auto; }
-.watch.is-active { display: block; }
-#inspector-canvas.is-hidden { display: none; }
+/* Visibility is governed by .inspector.is-active; this only bounds the height
+   so a long table scrolls inside the pane instead of stretching the page. */
+.watch { max-height: 320px; overflow-y: auto; }
 
 .watch-block {
   border: 1px solid var(--border);
@@ -524,15 +524,6 @@ kbd {
 }
 
 .watch-empty { color: var(--muted); font-family: var(--mono); font-size: 12px; }
-
-#inspector-canvas {
-  width: 100%;
-  height: auto;
-  display: block;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: #080a0e;
-}
 
 .log-line { display: flex; gap: 8px; white-space: pre-wrap; word-break: break-word; }
 .log-time { color: #4a5364; flex: none; }

@@ -41,7 +41,7 @@ function check(name, ok, detail) {
 
 const html = readFileSync(join(ROOT, 'index.html'), 'utf8');
 const HTML_IDS = [...html.matchAll(/id="([^"]+)"/g)].map((m) => m[1]);
-const CANVAS_SIZES = { 'game-canvas': [800, 500], 'minimap-canvas': [320, 240], 'inspector-canvas': [1200, 300] };
+const CANVAS_SIZES = { 'game-canvas': [800, 500], 'minimap-canvas': [320, 240] };
 
 const scriptErrors = [];
 const scriptSrcs = [];
@@ -285,54 +285,18 @@ check('minimap still renders with all five bypasses armed',
  * ====================================================================== */
 
 /* ====================================================================== *
- * Defense inspector
+ * Defense values panel
  *
- * The visual panel has to survive the same headless run as everything else,
- * and it has to actually plot the verdict history rather than an empty frame.
+ * The panel has to survive the same headless run as everything else, and it
+ * has to actually build a table of compared values rather than an empty frame.
  * ====================================================================== */
 
-console.log('\n\x1b[1mDefense inspector\x1b[0m');
+console.log('\n\x1b[1mDefense values panel\x1b[0m');
 {
-  const recorder = () => {
-    const ops = [];
-    const ctx = {
-      canvas: { width: 1200, height: 300 },
-      fillStyle: '', strokeStyle: '', lineWidth: 1, font: '',
-      fillRect: (x, y, w, h) => ops.push({ op: 'rect', x, y, w, h, fill: ctx.fillStyle }),
-      strokeRect: () => {}, fillText: (t, x, y) => ops.push({ op: 'text', t, x, y }),
-      beginPath: () => {}, closePath: () => {}, fill: () => {}, stroke: () => {},
-      moveTo: () => {}, lineTo: () => {}, arc: () => {}, rect: () => {},
-      clip: () => {}, save: () => {}, restore: () => {}
-    };
-    return { ctx, ops };
-  };
-
   const before = scriptErrors.length;
   S.ui.setInspectorTab('inspector');
-  S.ui.setInspectorView('timeline');
-  check('switching to the inspector tab does not throw', scriptErrors.length === before);
+  check('switching to the values tab does not throw', scriptErrors.length === before);
 
-  const t = recorder();
-  S.ui.drawInspector(t.ctx, 'timeline');
-  const laneLabels = S.defenses.list().map((d) => d.short);
-  const drawnLabels = laneLabels.filter((n) => t.ops.some((o) => o.op === 'text' && o.t === n));
-  const verdictColours = ['#2f8f5b', '#f0c040', '#f2545b', '#f0a860'];
-  const verdictBars = t.ops.filter((o) => o.op === 'rect' && verdictColours.indexOf(o.fill) >= 0);
-  check('timeline plots one lane per defense',
-    drawnLabels.length === laneLabels.length, drawnLabels.join(', '));
-  check('timeline plots the recorded verdict history',
-    verdictBars.length > 0, `${verdictBars.length} verdict segments`);
-
-  const sb = recorder();
-  S.ui.drawInspector(sb.ctx, 'scoreboard');
-  check('scoreboard names every defense and its blind spot',
-    laneLabels.every((n) => sb.ops.some((o) => o.op === 'text' && o.t === n)) &&
-    sb.ops.filter((o) => o.op === 'text' && /^BLIND TO/.test(o.t)).length === laneLabels.length,
-    `${laneLabels.length} rows`);
-
-  // The values view is real DOM, not canvas: the digests are what a reader
-  // selects and pastes into a report.
-  S.ui.setInspectorView('watch');
   const watch = elements.get('watch');
   const walk = (node, out = []) => {
     (node.children || []).forEach((c) => { out.push(c); walk(c, out); });
@@ -341,13 +305,18 @@ console.log('\n\x1b[1mDefense inspector\x1b[0m');
   const nodes = walk(watch);
   const rows = nodes.filter((n) => n.tagName === 'TR');
   const badRows = rows.filter((n) => /is-bad/.test(n.className || ''));
-  check('values view builds a table per defense',
+  const names = nodes
+    .filter((n) => /watch-name/.test(n.className || ''))
+    .map((n) => n.textContent);
+
+  check('one block per defense, each with its own table',
     watch.children.length === S.defenses.list().length && rows.length > 0,
     `${watch.children.length} blocks, ${rows.length} rows`);
+  check('every defense is named in the panel',
+    S.defenses.list().every((d) => names.indexOf(d.name) >= 0), names.join(', '));
   check('a mismatch is marked so the user can see it',
     badRows.length > 0, `${badRows.length} mismatched rows highlighted`);
 
-  S.ui.setInspectorView('timeline');
   S.ui.setInspectorTab('terminal');
 }
 
