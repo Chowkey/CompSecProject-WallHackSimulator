@@ -112,10 +112,6 @@
       lastColumns: ['item', 'expected', 'observed'],
       lastNote: '',
       lastMs: 0,
-      // Bounded verdict history, for the visual inspector. Every run is
-      // recorded, not just the ones that changed the verdict: the terminal
-      // wants the changes, a timeline wants every sample.
-      history: [],
       stats: {
         runs: 0, detected: 0, missed: 0,
         falsePositive: 0, trueNegative: 0, totalMs: 0
@@ -529,21 +525,6 @@
    * The runner
    * ====================================================================== */
 
-  var HISTORY_LIMIT = 1200;
-
-  function recordHistory(defense, outcome, tick, ms) {
-    var h = defense.history;
-    h.push({
-      tick: typeof tick === 'number' ? tick : (h.length ? h[h.length - 1].tick : 0),
-      outcome: outcome,
-      ms: ms || 0,
-      // The attacker level in force when the check ran, so the timeline can
-      // show which regime each verdict belongs to.
-      level: Sandbox.truthOracle.attackerLevel || 0
-    });
-    if (h.length > HISTORY_LIMIT) h.splice(0, h.length - HISTORY_LIMIT);
-  }
-
   function scoreOutcome(defense, alarm) {
     var shouldDetect = Sandbox.truthOracle.shouldDetect(defense.id);
     defense.stats.runs++;
@@ -695,7 +676,6 @@
     return Promise.all(jobs).then(function (rows) {
       rows.forEach(function (row) {
         var outcome = scoreOutcome(row.defense, row.result.alarm);
-        recordHistory(row.defense, outcome, tick, row.ms);
         reportOutcome(row.defense, outcome, row.result.detail, row.ms, tick,
           row.result);
       });
@@ -754,7 +734,6 @@
         actual: z === null ? '—' : z.toFixed(2), ok: !verdict.anomaly }
     ];
 
-    recordHistory(defense, outcome, verdict.tick, clientCostMs || 0);
     reportOutcome(defense, outcome, detail, clientCostMs || 0, verdict.tick, {
       values: values,
       columns: ['challenge field', 'expected', 'observed'],
@@ -771,7 +750,6 @@
   function resetStats() {
     defenses.forEach(function (d) {
       d.stats = { runs: 0, detected: 0, missed: 0, falsePositive: 0, trueNegative: 0, totalMs: 0 };
-      d.history.length = 0;
       d.lastValues = [];
       d.lastOutcome = null;
       d.lastDetail = '';
