@@ -635,6 +635,103 @@ section('9. Defense log legibility');
 }
 
 /* ====================================================================== *
+ * 11. Bypasses armed together
+ *
+ * Each bypass defeating its own defense in isolation is not the same claim as
+ * all five working at once, and the demo script asks for all five. They are
+ * not independent: bypass 2's trampoline unhooks and re-hooks around every
+ * inspection, and the fresh function objects that produces silently
+ * invalidated bypass 1's source-spoof table until the two were kept in sync.
+ * ====================================================================== */
+
+section('10. Watch values behind each verdict');
+{
+  const shaped = (v) => v && typeof v.label === 'string' &&
+    v.expected !== undefined && v.actual !== undefined && typeof v.ok === 'boolean';
+
+  S.attacker.setLevel(0);
+  const TICK = ['checksum', 'hooks', 'modules', 'signing'];
+  TICK.forEach((id) => { S.defenses.get(id).enabled = true; });
+  await S.defenses.runAll(10);
+
+  check('every check exposes the values it compared',
+    TICK.every((id) => {
+      const d = S.defenses.get(id);
+      return d.lastValues.length > 0 && d.lastValues.every(shaped) &&
+        d.lastColumns.length === 3 && d.lastNote;
+    }),
+    TICK.map((id) => `${id}:${S.defenses.get(id).lastValues.length}`).join(' '));
+
+  check('a clean client reports every value as matching',
+    TICK.every((id) => S.defenses.get(id).lastValues.every((v) => v.ok)));
+
+  // The values must disagree exactly where the verdict says they do.
+  S.attacker.setLevel(2);
+  await S.defenses.runAll(20);
+  const sum = S.defenses.get('checksum').lastValues;
+  const bad = sum.filter((v) => !v.ok);
+  check('a hooked function shows two different digests, not just a verdict',
+    bad.length === 2 && bad.every((v) => v.expected !== v.actual),
+    bad.map((v) => `${v.label} ${v.expected}→${v.actual}`).join('  '));
+
+  const sign = S.defenses.get('signing').lastValues.filter((v) => !v.ok);
+  check('code signing shows the manifest HMAC beside the computed one',
+    sign.length === 1 && sign[0].label === 'client.js' && sign[0].expected !== sign[0].actual,
+    sign.length ? `${sign[0].expected} vs ${sign[0].actual}` : 'no mismatch surfaced');
+
+  // Defense 5's values come from the server verdict, not from a local check.
+  S.defenses.get('challenge').enabled = true;
+  S.defenses.recordVerdict({
+    tick: 25, moduleId: 'client', valueOk: true, timedOut: false,
+    latencyMs: 41.2, z: 4.7, anomaly: true,
+    baselineMean: 8.3, baselineStd: 2.1, baselineReady: true
+  }, 41.2);
+  const chal = S.defenses.get('challenge').lastValues;
+  const digest = chal.find((v) => v.label === 'digest');
+  const zrow = chal.find((v) => v.label === 'z-score');
+  check('challenge-response shows a correct digest flagged on latency alone',
+    digest && digest.ok && zrow && !zrow.ok && zrow.actual === '4.70',
+    `digest ${digest && digest.actual}, z ${zrow && zrow.actual}`);
+
+  S.attacker.setLevel(0);
+  S.defenses.list().forEach((d) => { d.enabled = false; });
+}
+
+section('11. Bypasses armed together');
+{
+  const TICK_IDS = ['checksum', 'hooks', 'modules', 'signing'];
+
+  const withBypasses = async (armed) => {
+    S.attacker.setLevel(0);
+    S.defenses.list().forEach((d) => {
+      S.defenses.setBypass(d.id, armed.indexOf(d.id) >= 0);
+      d.enabled = d.id !== 'challenge';
+      d.lastOutcome = null;
+    });
+    S.attacker.setLevel(3);
+    // Two passes: the trampoline has to have fired at least once.
+    await S.defenses.runAll(10);
+    await S.defenses.runAll(20);
+    return TICK_IDS.map((id) => `${id}=${S.defenses.get(id).lastOutcome}`);
+  };
+
+  const solo = await withBypasses(['checksum']);
+  check('a bypass defeats its own defense on its own',
+    solo[0] === 'checksum=missed', solo.join('  '));
+
+  const pair = await withBypasses(['checksum', 'hooks']);
+  check('the trampoline does not re-expose the spoofed hooks',
+    pair[0] === 'checksum=missed' && pair[1] === 'hooks=missed', pair.join('  '));
+
+  const all = await withBypasses(TICK_IDS.concat(['challenge']));
+  check('all bypasses armed at once defeat all four tick-driven defenses',
+    all.every((r) => /=missed$/.test(r)), all.join('  '));
+
+  S.attacker.setLevel(0);
+  S.defenses.list().forEach((d) => { S.defenses.setBypass(d.id, false); d.enabled = false; });
+}
+
+/* ====================================================================== *
 
  * ====================================================================== */
 

@@ -141,12 +141,29 @@
 
   <section id="terminal-pane">
     <div id="terminal-toolbar">
-      <strong>Terminal</strong>
+      <div class="pane-tabs">
+        <button id="tab-terminal" class="pane-tab is-active">Terminal</button>
+        <button id="tab-inspector" class="pane-tab">Defense inspector</button>
+      </div>
       <div id="terminal-filters" class="filters"></div>
       <label class="inline"><input id="autoscroll-box" type="checkbox" checked> autoscroll</label>
       <button id="clear-log">Clear</button>
     </div>
+
     <div id="terminal" class="terminal"></div>
+
+    <div id="inspector" class="inspector">
+      <div class="inspector-bar">
+        <div class="pane-tabs">
+          <button id="view-timeline" class="pane-tab is-active">Timeline</button>
+          <button id="view-scoreboard" class="pane-tab">Scoreboard</button>
+          <button id="view-watch" class="pane-tab">Values</button>
+        </div>
+        <span id="inspector-caption" class="mono caption"></span>
+      </div>
+      <canvas id="inspector-canvas" width="1200" height="300"></canvas>
+      <div id="watch" class="watch"></div>
+    </div>
   </section>
 
   <section id="conclusion" class="conclusion"></section>

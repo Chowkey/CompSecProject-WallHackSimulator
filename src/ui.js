@@ -490,12 +490,328 @@
   }
 
   /* ====================================================================== *
+   * Defense inspector
+   *
+   * The terminal answers "what exactly did this check see?". It is bad at the
+   * other question a reviewer asks, which is "what shape does this attack have
+   * over time?" - five defenses flipping from green to red within one second of
+   * each other is a single image, and fifty scrolling lines of text.
+   *
+   * Drawn with plain fillRect/fillText only: no gradients, no measureText, so
+   * the headless boot test can run this path through its no-op canvas without
+   * throwing.
+   * ====================================================================== */
+
+  var inspectorView = 'timeline';
+
+  var VERDICT_COLOUR = {
+    clean: '#2f8f5b',
+    detected: '#f0c040',
+    missed: '#f2545b',
+    'false-positive': '#f0a860'
+  };
+
+  // Background tint per attacker level, so the regime each verdict belongs to
+  // is readable behind the lanes.
+  var LEVEL_TINT = [
+    null,
+    'rgba(94,200,242,0.07)',
+    'rgba(240,192,64,0.09)',
+    'rgba(242,84,91,0.11)'
+  ];
+  var LEVEL_NAME = ['attacker off', 'L1 passive', 'L2 wallhack', 'L3 evasive'];
+
+  var GUTTER = 132;
+  var MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace';
+
+  function tickWindow(list) {
+    var min = Infinity, max = -Infinity;
+    list.forEach(function (d) {
+      if (!d.history.length) return;
+      min = Math.min(min, d.history[0].tick);
+      max = Math.max(max, d.history[d.history.length - 1].tick);
+    });
+    if (!isFinite(min)) return null;
+    if (max - min < 60) max = min + 60;    // keep an empty run readable
+    return { min: min, max: max };
+  }
+
+  function drawTimeline(ctx, W, H, list) {
+    var win = tickWindow(list);
+    var top = 30, bottom = H - 30;
+    var laneH = (bottom - top) / list.length;
+    var plotW = W - GUTTER - 14;
+    var xOf = function (tick) {
+      if (!win) return GUTTER;
+      return GUTTER + plotW * ((tick - win.min) / (win.max - win.min));
+    };
+
+    // Attacker-level bands behind everything, taken from whichever defense has
+    // the longest history.
+    var spine = list.reduce(function (best, d) {
+      return d.history.length > best.length ? d.history : best;
+    }, []);
+    for (var s = 0; s < spine.length; s++) {
+      var tint = LEVEL_TINT[spine[s].level];
+      if (!tint) continue;
+      var bx0 = xOf(spine[s].tick);
+      var bx1 = xOf(s + 1 < spine.length ? spine[s + 1].tick : win.max);
+      ctx.fillStyle = tint;
+      ctx.fillRect(bx0, top, Math.max(1, bx1 - bx0), bottom - top);
+    }
+
+    list.forEach(function (defense, i) {
+      var y = top + i * laneH;
+      var h = laneH - 6;
+
+      ctx.fillStyle = '#12161d';
+      ctx.fillRect(GUTTER, y, plotW, h);
+
+      var hist = defense.history;
+      for (var j = 0; j < hist.length; j++) {
+        var x0 = xOf(hist[j].tick);
+        var x1 = xOf(j + 1 < hist.length ? hist[j + 1].tick : win.max);
+        ctx.fillStyle = VERDICT_COLOUR[hist[j].outcome] || '#2a3240';
+        ctx.fillRect(x0, y, Math.max(1.5, x1 - x0 - 0.5), h);
+      }
+
+      ctx.fillStyle = defense.enabled ? '#c9d4e4' : '#5a6377';
+      ctx.font = '12px ' + MONO;
+      ctx.fillText(defense.short, 10, y + h / 2 + 4);
+
+      if (!hist.length) {
+        ctx.fillStyle = '#3d4657';
+        ctx.font = '11px ' + MONO;
+        ctx.fillText(defense.enabled ? 'armed, no check yet' : 'not enabled',
+          GUTTER + 10, y + h / 2 + 4);
+      }
+    });
+
+    // Time axis.
+    ctx.fillStyle = '#5a6377';
+    ctx.font = '11px ' + MONO;
+    if (win) {
+      ctx.fillText('t=' + (win.min / P.TICK_HZ).toFixed(0) + 's', GUTTER, top - 10);
+      ctx.fillText('t=' + (win.max / P.TICK_HZ).toFixed(0) + 's', W - 60, top - 10);
+    }
+    ctx.fillText('every check, oldest left → newest right', GUTTER + 130, top - 10);
+
+    drawLegend(ctx, W, H);
+  }
+
+  function drawLegend(ctx, W, H) {
+    var items = [
+      ['clean', 'no alarm'],
+      ['detected', 'detected'],
+      ['missed', 'bypassed'],
+      ['false-positive', 'false pos']
+    ];
+    var x = 10;
+    var y = H - 16;
+    ctx.font = '11px ' + MONO;
+    items.forEach(function (item) {
+      ctx.fillStyle = VERDICT_COLOUR[item[0]];
+      ctx.fillRect(x, y - 8, 10, 10);
+      ctx.fillStyle = '#8b97ab';
+      ctx.fillText(item[1], x + 15, y + 1);
+      x += 15 + item[1].length * 6.6 + 16;
+    });
+
+    x += 10;
+    for (var lv = 1; lv <= 3; lv++) {
+      ctx.fillStyle = LEVEL_TINT[lv];
+      ctx.fillRect(x, y - 8, 10, 10);
+      ctx.strokeStyle = '#2a3240';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x + 0.5, y - 7.5, 9, 9);
+      ctx.fillStyle = '#8b97ab';
+      ctx.fillText(LEVEL_NAME[lv], x + 15, y + 1);
+      x += 15 + LEVEL_NAME[lv].length * 6.6 + 16;
+    }
+  }
+
+  function bar(ctx, x, y, w, h, fraction, colour) {
+    ctx.fillStyle = '#161b24';
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = colour;
+    ctx.fillRect(x, y, Math.max(0, Math.min(1, fraction)) * w, h);
+  }
+
+  function drawScoreboard(ctx, W, H, list) {
+    var rowH = (H - 24) / list.length;
+    var maxMs = list.reduce(function (m, d) {
+      return Math.max(m, d.stats.runs ? d.stats.totalMs / d.stats.runs : 0);
+    }, 0.001);
+
+    list.forEach(function (defense, i) {
+      var y = 20 + i * rowH;
+      var st = defense.stats;
+      var opportunities = st.detected + st.missed;
+      var rate = opportunities ? st.detected / opportunities : 0;
+      var avg = st.runs ? st.totalMs / st.runs : 0;
+
+      ctx.fillStyle = defense.enabled ? '#c9d4e4' : '#5a6377';
+      ctx.font = '12px ' + MONO;
+      ctx.fillText(defense.short, 10, y + 12);
+
+      // Detection rate: how often it caught real tampering when there was some.
+      ctx.fillStyle = '#5a6377';
+      ctx.font = '11px ' + MONO;
+      ctx.fillText('caught', GUTTER, y + 12);
+      bar(ctx, GUTTER + 48, y + 3, 200, 11, rate,
+        rate > 0.66 ? '#41d17f' : rate > 0 ? '#f0c040' : '#f2545b');
+      ctx.fillStyle = '#8b97ab';
+      ctx.fillText(st.detected + '/' + opportunities +
+        (opportunities ? '  (' + Math.round(100 * rate) + '%)' : '  (no tampering yet)'),
+        GUTTER + 256, y + 12);
+
+      // Cost, relative to the most expensive check on screen.
+      ctx.fillStyle = '#5a6377';
+      ctx.fillText('cost', GUTTER + 420, y + 12);
+      bar(ctx, GUTTER + 456, y + 3, 120, 11, avg / maxMs, '#6fb4e8');
+      ctx.fillStyle = '#8b97ab';
+      ctx.fillText(avg.toFixed(2) + 'ms × ' + st.runs + ' runs', GUTTER + 584, y + 12);
+
+      // The structural point, next to the numbers.
+      ctx.fillStyle = '#6b7688';
+      ctx.font = '11px ' + MONO;
+      ctx.fillText('BLIND TO  ' + (defense.blind || '—'), GUTTER, y + 30);
+
+      if (defense.lastOutcome) {
+        ctx.fillStyle = VERDICT_COLOUR[defense.lastOutcome] || '#5a6377';
+        ctx.fillRect(10, y + 22, 8, 8);
+        ctx.fillStyle = '#8b97ab';
+        ctx.fillText(defense.lastOutcome, 24, y + 30);
+      }
+    });
+  }
+
+  /**
+   * The watch panel: the raw expected/observed pairs each check actually
+   * compared, rather than the sentence it produced afterwards.
+   *
+   * Built as real DOM instead of canvas on purpose - the digests are the
+   * numbers a reader wants to select and paste into a report, and a canvas
+   * cannot be copied out of.
+   */
+  function renderWatch() {
+    if (!el.watch || !el.watch.classList.contains('is-active')) return;
+    el.watch.innerHTML = '';
+
+    Sandbox.defenses.list().forEach(function (defense) {
+      var block = make('div', 'watch-block' + (defense.enabled ? '' : ' is-off'));
+
+      var head = make('div', 'watch-head');
+      head.appendChild(make('span', 'watch-name', defense.name));
+
+      var state = defense.enabled ? (defense.lastOutcome || 'waiting') : 'not armed';
+      var chipClass = { clean: 'bd-pass', detected: 'bd-detect', missed: 'bd-bypass',
+                        'false-positive': 'bd-false' }[defense.lastOutcome] || '';
+      head.appendChild(make('span', 'log-badge ' + chipClass,
+        defense.enabled ? (BADGE_TEXT[defense.lastOutcome] || 'WAITING') : 'OFF'));
+      head.appendChild(make('span', 'watch-cost',
+        defense.lastMs ? defense.lastMs.toFixed(2) + 'ms' : ''));
+      block.appendChild(head);
+
+      var values = defense.lastValues || [];
+      if (!values.length) {
+        block.appendChild(make('p', 'watch-empty', defense.enabled
+          ? 'armed — values appear after the first check'
+          : 'enable this defense to see what it compares'));
+      } else {
+        block.appendChild(buildWatchTable(defense, values));
+        if (defense.lastNote) {
+          block.appendChild(make('p', 'watch-note', defense.lastNote));
+        }
+      }
+      el.watch.appendChild(block);
+    });
+  }
+
+  function buildWatchTable(defense, values) {
+    var table = make('table', 'watch-table');
+    var thead = make('thead');
+    var hrow = make('tr');
+    (defense.lastColumns || []).forEach(function (name) {
+      hrow.appendChild(make('th', null, name));
+    });
+    hrow.appendChild(make('th'));
+    thead.appendChild(hrow);
+    table.appendChild(thead);
+
+    var tbody = make('tbody');
+    values.forEach(function (v) {
+      var row = make('tr', v.ok ? null : 'is-bad');
+      row.appendChild(make('td', null, v.label));
+      row.appendChild(make('td', null, String(v.expected)));
+      row.appendChild(make('td', 'col-actual', String(v.actual)));
+      row.appendChild(make('td', 'watch-mark', v.ok ? '✓' : '✗'));
+      tbody.appendChild(row);
+    });
+    table.appendChild(tbody);
+    return table;
+  }
+
+  var BADGE_TEXT = {
+    clean: 'PASS', detected: 'DETECT', missed: 'BYPASS', 'false-positive': 'FALSE+'
+  };
+
+  var VIEW_CAPTION = {
+    timeline: 'every check plotted in time order',
+    scoreboard: 'detection rate is over checks where tampering was actually present',
+    watch: 'the raw values each check compared on its last run'
+  };
+
+  function renderInspector() {
+    if (!el.inspector.classList.contains('is-active')) return;
+
+    var list = Sandbox.defenses.list();
+    var armed = list.filter(function (d) { return d.enabled; }).length;
+    el.inspectorCaption.textContent = armed + '/' + list.length +
+      ' defenses armed · attacker level ' +
+      (Sandbox.attacker ? Sandbox.attacker.getLevel() : 0) +
+      ' · ' + VIEW_CAPTION[inspectorView];
+
+    if (inspectorView === 'watch') return renderWatch();
+    if (!el.inspectorCtx) return;
+
+    var ctx = el.inspectorCtx;
+    var W = ctx.canvas.width, H = ctx.canvas.height;
+    ctx.fillStyle = '#080a0e';
+    ctx.fillRect(0, 0, W, H);
+    if (inspectorView === 'timeline') drawTimeline(ctx, W, H, list);
+    else drawScoreboard(ctx, W, H, list);
+  }
+
+  function setInspectorTab(name) {
+    var showInspector = name === 'inspector';
+    el.inspector.classList.toggle('is-active', showInspector);
+    el.terminal.classList.toggle('is-hidden', showInspector);
+    el.tabTerminal.classList.toggle('is-active', !showInspector);
+    el.tabInspector.classList.toggle('is-active', showInspector);
+    el.terminalFilters.style.display = showInspector ? 'none' : '';
+    renderInspector();
+  }
+
+  function setInspectorView(name) {
+    inspectorView = name;
+    el.viewTimeline.classList.toggle('is-active', name === 'timeline');
+    el.viewScoreboard.classList.toggle('is-active', name === 'scoreboard');
+    el.viewWatch.classList.toggle('is-active', name === 'watch');
+    el.watch.classList.toggle('is-active', name === 'watch');
+    el.inspectorCanvas.classList.toggle('is-hidden', name === 'watch');
+    renderInspector();
+  }
+
+  /* ====================================================================== *
    * Lifecycle
    * ====================================================================== */
 
   function init() {
     [
       'controls', 'defense-pane',
+      'tab-terminal', 'tab-inspector', 'inspector', 'inspector-canvas',
+      'inspector-caption', 'view-timeline', 'view-scoreboard', 'view-watch', 'watch',
       'env-line', 'banner', 'game-canvas', 'game-caption', 'minimap-canvas', 'legend',
       'leak-readout', 'defense-list', 'terminal', 'terminal-filters', 'conclusion',
       'seed-input', 'random-seed', 'reset-btn', 'play-btn', 'step-btn', 'speed-select',
@@ -511,7 +827,14 @@
 
     el.mainCtx = el.gameCanvas.getContext('2d');
     el.minimapCtx = el.minimapCanvas.getContext('2d');
-    Sandbox.app.attachCanvases(el.mainCtx, el.minimapCtx);
+    el.inspectorCtx = el.inspectorCanvas.getContext('2d');
+    Sandbox.app.attachCanvases(el.mainCtx, el.minimapCtx, el.gameCanvas);
+
+    el.tabTerminal.addEventListener('click', function () { setInspectorTab('terminal'); });
+    el.tabInspector.addEventListener('click', function () { setInspectorTab('inspector'); });
+    el.viewTimeline.addEventListener('click', function () { setInspectorView('timeline'); });
+    el.viewScoreboard.addEventListener('click', function () { setInspectorView('scoreboard'); });
+    el.viewWatch.addEventListener('click', function () { setInspectorView('watch'); });
 
     buildTerminalFilters();
     buildDefensePanel();
@@ -526,6 +849,7 @@
       renderDefensePanel();
       renderReadouts();
       updateLockHint();
+      renderInspector();
     }, 250);
   }
 
@@ -556,7 +880,17 @@
     onVerdict: onVerdict,
     onBooted: onBooted,
     renderConclusion: renderConclusion,
-    openDefenseModal: openDefenseModal
+    openDefenseModal: openDefenseModal,
+    // Exposed so the headless boot test can drive the inspector through a
+    // recording canvas and assert it actually plots something.
+    setInspectorTab: setInspectorTab,
+    setInspectorView: setInspectorView,
+    drawInspector: function (ctx, view) {
+      var list = Sandbox.defenses.list();
+      var W = ctx.canvas.width, H = ctx.canvas.height;
+      if (view === 'scoreboard') drawScoreboard(ctx, W, H, list);
+      else drawTimeline(ctx, W, H, list);
+    }
   };
 
   Sandbox.ui = exports;

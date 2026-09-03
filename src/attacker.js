@@ -290,6 +290,10 @@
     clientRegion.exports.renderMinimap = hook;
     clientRegion.exports.renderMain = hook3d;
     installed.renderHook = true;
+
+    // These hooks are brand new objects, so the source spoof has to be pointed
+    // at them again. See registerSpoofs().
+    if (installed.toStringSpoof) registerSpoofs();
   }
 
   function removeRenderHook() {
@@ -303,17 +307,32 @@
 
   var spoofedSource = new WeakMap();
 
-  function installToStringSpoof() {
-    if (installed.toStringSpoof) return;
-
-    // Every hooked function needs an entry, or Defense 1 catches the one that
-    // was forgotten. That is the realistic failure mode for this bypass: it is
-    // not hard, it is just book-keeping the attacker has to get exhaustively
-    // right, and the defender only has to find one omission.
+  /**
+   * Point the spoof table at whatever functions are hooked *right now*.
+   *
+   * Split out because the table has to be rebuilt every time the hooks are, not
+   * just once when the bypass is armed. The entries are keyed by function
+   * object, and installRenderHook() creates fresh ones on every call - so the
+   * trampoline in bypass 2, which unhooks and re-hooks around each inspection,
+   * silently invalidated every entry the first time it fired. Bypass 1 then
+   * stopped working, but only when bypass 2 was armed alongside it.
+   *
+   * The realistic reading: a cheat's evasions are not independent. Each one is
+   * book-keeping the attacker has to keep exhaustively in sync with all the
+   * others, and the defender only has to find one place where they drifted
+   * apart.
+   */
+  function registerSpoofs() {
     spoofedSource.set(clientRegion.exports.renderMinimap,
       original.functionToString.call(original.renderMinimap));
     spoofedSource.set(clientRegion.exports.renderMain,
       original.functionToString.call(original.renderMain));
+  }
+
+  function installToStringSpoof() {
+    if (installed.toStringSpoof) return;
+
+    registerSpoofs();
 
     Function.prototype.toString = function () {
       if (spoofedSource.has(this)) return spoofedSource.get(this);

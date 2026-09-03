@@ -97,6 +97,63 @@ Roughly eight minutes, in the order that builds the argument.
 
 ---
 
+## The defense inspector
+
+The bottom pane has two tabs. The terminal answers *what exactly did this check see?*; the
+inspector answers *what shape does this attack have over time?* — a question fifty scrolling
+lines of text are bad at.
+
+**Timeline** plots every check as a coloured segment on one lane per defense, with the attacker
+level tinted behind them. Arming the defenses and then stepping the attacker 0 → 2 → 3 draws
+the whole argument as one image: five lanes green, five lanes amber the instant a naive cheat
+appears, five lanes red the instant it becomes evasive.
+
+**Scoreboard** gives each defense its detection rate over the checks where tampering was
+actually present, its cost relative to the most expensive check on screen, and — next to the
+numbers — the one line saying what it is structurally blind to.
+
+**Values** is the watch window: the raw expected/observed pairs each check actually compared on
+its last run, with every mismatch highlighted. Not a summary of the comparison — the
+comparison itself.
+
+```
+Code checksum                                          DETECT   0.78ms
+  watched function      baseline SHA-256   current SHA-256
+  client.renderMinimap  ea8d9e…            9eb235…            ✗
+  client.renderMain     791046…            9844e1…            ✗
+  client.applyPacket    ad0262…            ad0262…            ✓
+```
+
+Each defense declares its own columns, so the table says what the check is really about:
+`baseline SHA-256 / current SHA-256` for the checksum, `manifest HMAC / computed HMAC` for code
+signing, `pristine reference / current reference` for hook detection, and for
+challenge–response the digest, the round trip against the measured baseline, and the z-score —
+where the demo's sharpest row is a digest reading **matches ✓** on a session flagged anyway,
+because the latency was four sigma out.
+
+It is rendered as real DOM rather than canvas so the digests can be selected and pasted
+straight into the report. The values are the same objects the terminal formats its evidence
+lines from, so the table and the log can never disagree.
+
+This panel paid for itself immediately: see below.
+
+## A bug the timeline found
+
+With every bypass armed at once, the Checksum lane went amber again while the other three
+stayed red. Each bypass defeats its own defense in isolation, so the per-defense benchmark had
+always passed — but the demo script asks for all five together, and in that configuration
+Defense 1 was quietly still catching the cheat.
+
+Bypass 2's trampoline unhooks and re-hooks around every inspection, and `installRenderHook()`
+builds fresh function objects each time. Bypass 1's spoof table is a `WeakMap` keyed by those
+objects, so the first trampoline firing invalidated every entry in it. The fix is to rebuild
+the table whenever the hooks are rebuilt.
+
+The honest reading is more interesting than the fix: **a cheat's evasions are not independent**.
+Each one is book-keeping the attacker must keep exhaustively in sync with all the others, and
+the defender only has to find one place where they drifted apart. `tools/selftest.mjs` §10 now
+tests the bypasses in combination, not just one at a time.
+
 ## Reading the terminal
 
 The five checks print into one comparable column rather than five differently worded

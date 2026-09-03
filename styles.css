@@ -435,6 +435,105 @@ kbd {
   line-height: 1.55;
 }
 
+/* --- tabbed bottom pane -------------------------------------------------- */
+
+.pane-tabs { display: flex; gap: 4px; flex: none; }
+
+.pane-tab {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--muted);
+  padding: 4px 10px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.pane-tab:hover:not(.is-active) { color: var(--text); background: rgba(255,255,255,0.04); }
+.pane-tab.is-active {
+  color: var(--text);
+  border-color: var(--border);
+  background: var(--panel-2);
+}
+
+.inspector { display: none; }
+.inspector.is-active { display: block; }
+#terminal.is-hidden { display: none; }
+
+.inspector-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+/* --- watch panel: the raw values behind each verdict ---------------------- */
+
+.watch { display: none; max-height: 300px; overflow-y: auto; }
+.watch.is-active { display: block; }
+#inspector-canvas.is-hidden { display: none; }
+
+.watch-block {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  background: var(--panel-2);
+}
+.watch-block.is-off { opacity: 0.45; }
+
+.watch-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.watch-name { font-weight: 600; font-size: 13px; }
+.watch-cost { color: var(--muted); font-family: var(--mono); font-size: 11px; }
+
+.watch-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.watch-table th {
+  text-align: left;
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 2px 10px 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+.watch-table td {
+  padding: 3px 10px 3px 0;
+  color: #a9b6c9;
+  vertical-align: top;
+  /* Hashes are the thing a reader copies into a report, so let them wrap
+     rather than overflow. */
+  word-break: break-all;
+}
+.watch-table tr.is-bad td { color: var(--wallhack); }
+.watch-table tr.is-bad { background: rgba(242,84,91,0.08); }
+.watch-table td.col-actual { color: #e6eefc; }
+.watch-table tr.is-bad td.col-actual { color: var(--wallhack); font-weight: 600; }
+.watch-mark { text-align: right; }
+
+.watch-note {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.watch-empty { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+
+#inspector-canvas {
+  width: 100%;
+  height: auto;
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #080a0e;
+}
+
 .log-line { display: flex; gap: 8px; white-space: pre-wrap; word-break: break-word; }
 .log-time { color: #4a5364; flex: none; }
 .log-label { flex: none; }

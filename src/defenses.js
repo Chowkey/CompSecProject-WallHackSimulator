@@ -105,6 +105,17 @@
       bypassEnabled: false,
       lastOutcome: null,
       lastDetail: '',
+      // The raw expected/observed pairs the last run compared, surfaced by the
+      // inspector's watch panel. A verdict is only as convincing as the values
+      // behind it, so they are kept rather than formatted away.
+      lastValues: [],
+      lastColumns: ['item', 'expected', 'observed'],
+      lastNote: '',
+      lastMs: 0,
+      // Bounded verdict history, for the visual inspector. Every run is
+      // recorded, not just the ones that changed the verdict: the terminal
+      // wants the changes, a timeline wants every sample.
+      history: [],
       stats: {
         runs: 0, detected: 0, missed: 0,
         falsePositive: 0, trueNegative: 0, totalMs: 0
@@ -227,23 +238,34 @@
         }
       });
 
-      // The evidence is the hashes themselves. Printing all of them is the
-      // point: a reviewer can watch a specific digest change the instant the
-      // hook goes in, and watch it stop changing once the bypass is armed.
-      var evidence = results.map(function (r) {
-        if (r.missing) return r.key + ' MISSING';
+      // The values are the hashes themselves. Exposing them is the point: a
+      // reviewer can watch a specific digest change the instant the hook goes
+      // in, and watch it stop changing once the bypass is armed.
+      var values = results.map(function (r) {
         var expected = baselineHashes.get(r.key);
-        if (expected && expected !== r.hex) {
-          return r.key + ' ' + Hash.short(expected) + '→' + Hash.short(r.hex) + ' ✗';
+        if (r.missing) {
+          return { label: r.key, expected: Hash.short(expected || ''), actual: 'MISSING', ok: false };
         }
-        return r.key + ' ' + Hash.short(r.hex) + ' ✓';
+        return {
+          label: r.key,
+          expected: Hash.short(expected || r.hex),
+          actual: Hash.short(r.hex),
+          ok: !expected || expected === r.hex
+        };
       });
 
       var detail = mismatches.length
         ? mismatches.length + '/' + results.length + ' function hashes changed'
         : results.length + '/' + results.length + ' function hashes match baseline';
 
-      return { alarm: mismatches.length > 0, detail: detail, evidence: evidence };
+      return {
+        alarm: mismatches.length > 0,
+        detail: detail,
+        values: values,
+        columns: ['watched function', 'baseline SHA-256', 'current SHA-256'],
+        note: 'the baseline was taken at boot; the current column is whatever ' +
+          'fn.toString() returns right now'
+      };
     });
   }
 
@@ -259,20 +281,30 @@
    */
   function checkHooks() {
     var findings = [];
+    var values = [];
+
     WATCHED.forEach(function (entry) {
       var k = key(entry);
       var current = lookup(entry.module, entry.name);
       var pristine = pristineRefs.get(k);
       if (!pristine) return;
+      var meta = pristineMeta.get(k) || {};
 
-      if (current !== pristine) {
-        findings.push(k + ' reference replaced');
-        return;
-      }
-      var meta = pristineMeta.get(k);
-      if (meta && (current.name !== meta.name || current.length !== meta.length)) {
-        findings.push(k + ' signature drift (name/arity)');
-      }
+      // The identity comparison is the only part with teeth, so it is what the
+      // table shows first; name and arity are printed beside it precisely
+      // because they look reassuring and are trivially forgeable.
+      var replaced = current !== pristine;
+      var drift = !replaced && (current.name !== meta.name || current.length !== meta.length);
+      if (replaced) findings.push(k + ' reference replaced');
+      else if (drift) findings.push(k + ' signature drift (name/arity)');
+
+      values.push({
+        label: k,
+        expected: 'same ref · ' + meta.name + '/' + meta.length,
+        actual: (replaced ? 'REPLACED' : 'same ref') + ' · ' +
+          (current ? current.name + '/' + current.length : '—'),
+        ok: !replaced && !drift
+      });
     });
 
     return Promise.resolve({
@@ -280,9 +312,10 @@
       detail: findings.length
         ? findings.length + '/' + WATCHED.length + ' references replaced'
         : WATCHED.length + '/' + WATCHED.length + ' references identical to originals',
-      evidence: findings.length ? findings : WATCHED.map(function (entry) {
-        return key(entry) + ' ✓';
-      })
+      values: values,
+      columns: ['watched export', 'pristine reference', 'current reference'],
+      note: 'name and arity are shown because they look like evidence and are ' +
+        'forged in one line; only the reference comparison means anything'
     });
   }
 
@@ -330,15 +363,38 @@
 
     var mods = Object.keys(pm.modules);
     var priv = Object.keys(pm.private);
+
+    var values = mods.map(function (id) {
+      return {
+        label: 'module ' + id,
+        expected: 'registered + signed',
+        actual: pm.modules[id].signed ? 'registered + signed' : 'NOT IN MANIFEST',
+        ok: !!pm.modules[id].signed
+      };
+    });
+    priv.forEach(function (name) {
+      values.push({
+        label: 'private region ' + name,
+        expected: '(none should exist)',
+        actual: typeof pm.private[name] === 'function' ? 'EXECUTABLE, unbacked' : 'data',
+        ok: typeof pm.private[name] !== 'function'
+      });
+    });
+    findings.forEach(function (f) {
+      if (f.indexOf('new global') !== 0) return;
+      values.push({ label: f.replace(/^new global function /, 'global '),
+        expected: 'absent at boot', actual: 'PRESENT', ok: false });
+    });
+
     return Promise.resolve({
       alarm: findings.length > 0,
       detail: findings.length
         ? findings.length + ' unaccounted region(s) found'
         : mods.length + ' modules + ' + priv.length + ' private regions, all accounted for',
-      evidence: findings.length ? findings : [
-        'modules  ' + mods.join(' '),
-        'private  ' + (priv.length ? priv.join(' ') : '(none)')
-      ]
+      values: values,
+      columns: ['region', 'expected', 'observed'],
+      note: 'this list is self-reported by the loader — code that never ' +
+        'registers does not appear on it at all'
     });
   }
 
@@ -374,20 +430,19 @@
     return Promise.all(jobs).then(function (results) {
       var bad = results.filter(function (r) { return !r.ok; });
 
-      // Per-module HMACs, three to a row. A signature check that only reports
-      // "all good" is indistinguishable from one that is not running at all,
-      // and the whole argument of this defense is about what the green tick
-      // actually covers - so the covered files are named, one by one.
-      var rows = [];
-      for (var i = 0; i < results.length; i += 3) {
-        rows.push(results.slice(i, i + 3).map(function (r) {
-          return padTo(r.id, 10) + ' ' +
-            (r.sig ? Hash.short(r.sig) : '—') + (r.ok ? ' ✓' : ' ✗ ' + r.reason);
-        }).join('   '));
-      }
-      rows.push('verified against manifest.json fetched at ' +
-        new Date(Sandbox.signing.verifiedAt).toISOString().slice(11, 19) +
-        ' — these are the bytes on disk, not the code now running');
+      // A signature check that only reports "all good" is indistinguishable
+      // from one that is not running at all, and the whole argument of this
+      // defense is about what the green tick actually covers - so every
+      // covered file is named with both HMACs side by side.
+      var values = results.map(function (r) {
+        var entry = manifest.modules[r.id];
+        return {
+          label: r.id + '.js',
+          expected: entry ? Hash.short(entry.hmac) : 'not in manifest',
+          actual: r.sig ? Hash.short(r.sig) : (r.reason || '—'),
+          ok: r.ok
+        };
+      });
 
       return {
         alarm: bad.length > 0,
@@ -395,7 +450,11 @@
           ? bad.length + '/' + results.length + ' modules FAIL: ' +
             bad.map(function (r) { return r.id; }).join(', ')
           : results.length + '/' + results.length + ' modules match manifest',
-        evidence: rows
+        values: values,
+        columns: ['module', 'manifest HMAC', 'computed HMAC'],
+        note: 'computed over the bytes fetched at ' +
+          new Date(Sandbox.signing.verifiedAt).toISOString().slice(11, 19) +
+          ' — these are the bytes on disk, not the code now running'
       };
     });
   }
@@ -470,6 +529,21 @@
    * The runner
    * ====================================================================== */
 
+  var HISTORY_LIMIT = 1200;
+
+  function recordHistory(defense, outcome, tick, ms) {
+    var h = defense.history;
+    h.push({
+      tick: typeof tick === 'number' ? tick : (h.length ? h[h.length - 1].tick : 0),
+      outcome: outcome,
+      ms: ms || 0,
+      // The attacker level in force when the check ran, so the timeline can
+      // show which regime each verdict belongs to.
+      level: Sandbox.truthOracle.attackerLevel || 0
+    });
+    if (h.length > HISTORY_LIMIT) h.splice(0, h.length - HISTORY_LIMIT);
+  }
+
   function scoreOutcome(defense, alarm) {
     var shouldDetect = Sandbox.truthOracle.shouldDetect(defense.id);
     defense.stats.runs++;
@@ -492,6 +566,22 @@
     var out = String(text);
     while (out.length < width) out += ' ';
     return out;
+  }
+
+  /**
+   * Terminal evidence lines, derived from the same structured values the watch
+   * panel renders. One source of truth: a value that appears in the table is
+   * the value that was logged, and neither can drift from the other.
+   */
+  function evidenceFrom(values, note) {
+    if (!values || !values.length) return note ? [note] : [];
+    var width = values.reduce(function (m, v) { return Math.max(m, v.label.length); }, 0);
+    var lines = values.map(function (v) {
+      var shown = v.ok ? v.actual : v.expected + ' → ' + v.actual;
+      return padTo(v.label, width + 2) + shown + (v.ok ? '  ✓' : '  ✗');
+    });
+    if (note) lines.push(note);
+    return lines;
   }
 
   // One chip per outcome, so five different checks produce one comparable
@@ -518,12 +608,22 @@
     Log.push(defense.logLevel, 'BLIND TO  ' + defense.blind, null, '');
   }
 
-  function reportOutcome(defense, outcome, detail, ms, tick, evidence) {
+  function reportOutcome(defense, outcome, detail, ms, tick, result) {
     var changed = defense.lastOutcome !== outcome;
     defense.lastOutcome = outcome;
     defense.lastDetail = detail;
 
+    // Kept whether or not the terminal is muted: the watch panel reads these,
+    // and a benchmark run mutes the log but still updates the UI.
+    if (result) {
+      defense.lastValues = result.values || [];
+      defense.lastColumns = result.columns || ['item', 'expected', 'observed'];
+      defense.lastNote = result.note || '';
+      defense.lastMs = ms;
+    }
+
     if (Log.isMuted()) return;
+    var evidence = result ? evidenceFrom(result.values, result.note) : null;
 
     // Evidence is verbose, so it is printed when the verdict changes rather
     // than on every one of the two checks per second.
@@ -595,8 +695,9 @@
     return Promise.all(jobs).then(function (rows) {
       rows.forEach(function (row) {
         var outcome = scoreOutcome(row.defense, row.result.alarm);
+        recordHistory(row.defense, outcome, tick, row.ms);
         reportOutcome(row.defense, outcome, row.result.detail, row.ms, tick,
-          row.result.evidence);
+          row.result);
       });
     });
   }
@@ -635,7 +736,31 @@
       Log.lesson('Timing analysis caught what content inspection could not. When the ' +
         'answer cannot be trusted, measure the physical cost of producing it.');
     }
-    reportOutcome(defense, outcome, detail, clientCostMs || 0, verdict.tick);
+    // The server holds the reference copy, so these are the only numbers the
+    // client side ever gets to see about its own answer.
+    var z = typeof verdict.z === 'number' ? verdict.z : null;
+    var values = [
+      { label: 'module challenged', expected: 'chosen at random by the server',
+        actual: verdict.moduleId, ok: true },
+      { label: 'digest', expected: "server's own copy",
+        actual: verdict.valueOk ? 'matches' : 'MISMATCH', ok: !!verdict.valueOk },
+      { label: 'deadline', expected: '≤ ' + P.CHALLENGE_DEADLINE_MS + 'ms',
+        actual: verdict.timedOut ? 'MISSED' : 'met', ok: !verdict.timedOut },
+      { label: 'round trip', expected: verdict.baselineReady
+          ? verdict.baselineMean.toFixed(1) + ' ± ' + verdict.baselineStd.toFixed(1) + 'ms'
+          : 'baseline still filling',
+        actual: verdict.latencyMs.toFixed(1) + 'ms', ok: !verdict.anomaly },
+      { label: 'z-score', expected: '< ' + P.TIMING_Z_THRESHOLD,
+        actual: z === null ? '—' : z.toFixed(2), ok: !verdict.anomaly }
+    ];
+
+    recordHistory(defense, outcome, verdict.tick, clientCostMs || 0);
+    reportOutcome(defense, outcome, detail, clientCostMs || 0, verdict.tick, {
+      values: values,
+      columns: ['challenge field', 'expected', 'observed'],
+      note: 'the digest can be correct and the session still flagged — that is ' +
+        'the whole point of measuring latency instead of content'
+    });
   }
 
   function now() {
@@ -646,6 +771,8 @@
   function resetStats() {
     defenses.forEach(function (d) {
       d.stats = { runs: 0, detected: 0, missed: 0, falsePositive: 0, trueNegative: 0, totalMs: 0 };
+      d.history.length = 0;
+      d.lastValues = [];
       d.lastOutcome = null;
       d.lastDetail = '';
     });
