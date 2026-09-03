@@ -34,6 +34,13 @@
   // Order matters: each module may use the ones above it.
   var MODULE_FILES = ['rng', 'protocol', 'log', 'client', 'defenses', 'education', 'export', 'ui'];
 
+  // Match tools/sign.mjs. Line endings do not change JavaScript behaviour, so
+  // they are normalized before both verification and execution. This keeps a
+  // committed manifest portable across operating systems and archive tools.
+  function canonicalSource(source) {
+    return source.replace(/\r\n?/g, '\n');
+  }
+
   // Buffered because the loader runs before log.js exists; flushed once the
   // modules are up so the terminal shows the boot sequence in order.
   var bootLog = [];
@@ -93,7 +100,9 @@
       var sources = {};
       return MODULE_FILES.reduce(function (chain, id) {
         return chain.then(function () {
-          return fetchText('src/' + id + '.js').then(function (src) { sources[id] = src; });
+          return fetchText('src/' + id + '.js').then(function (src) {
+            sources[id] = canonicalSource(src);
+          });
         });
       }, Promise.resolve()).then(function () { return sources; });
     }).then(function (sources) {

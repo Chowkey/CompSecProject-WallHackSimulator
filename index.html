@@ -149,17 +149,17 @@
   <section id="terminal-pane">
     <div id="terminal-toolbar">
       <div class="pane-tabs">
-        <button id="tab-terminal" class="pane-tab is-active">Terminal</button>
-        <button id="tab-inspector" class="pane-tab">Defense values</button>
+        <button id="tab-terminal" class="pane-tab">Terminal</button>
+        <button id="tab-inspector" class="pane-tab is-active">Defense values</button>
       </div>
-      <div id="terminal-filters" class="filters"></div>
+      <div id="terminal-filters" class="filters" style="display:none"></div>
       <label class="inline"><input id="autoscroll-box" type="checkbox" checked> autoscroll</label>
       <button id="clear-log">Clear</button>
     </div>
 
-    <div id="terminal" class="terminal"></div>
+    <div id="terminal" class="terminal is-hidden"></div>
 
-    <div id="inspector" class="inspector">
+    <div id="inspector" class="inspector is-active">
       <div class="inspector-bar">
         <span id="inspector-caption" class="mono caption"></span>
       </div>

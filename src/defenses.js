@@ -101,7 +101,7 @@
       blind: spec.blind,
       bypassName: spec.bypassName,
       bypassLesson: spec.bypassLesson,
-      enabled: false,
+      enabled: !!spec.enabled,
       bypassEnabled: false,
       lastOutcome: null,
       lastDetail: '',
@@ -129,6 +129,7 @@
       logLevel: 'def-sum',
       entry: 'checkChecksums',
       bypassName: 'toString() spoofing',
+      enabled: true,
       realWorld: 'Hashing the .text section and comparing against a baseline.',
       bypassLesson: 'A checker has to READ the thing it checks, and the attacker ' +
         'controls that read. Overriding Function.prototype.toString is the exact ' +
@@ -144,6 +145,7 @@
       logLevel: 'def-hook',
       entry: 'checkHooks',
       bypassName: 'trampoline / self-disarm',
+      enabled: true,
       realWorld: 'Comparing function prologues and IAT entries against saved originals.',
       bypassLesson: 'The checker is just another function, hookable like any other. ' +
         'The cheat restores the originals immediately before the check runs and ' +

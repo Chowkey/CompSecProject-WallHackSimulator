@@ -1,0 +1,7 @@
+# Keep executable source stable across Windows, macOS, and Linux checkouts.
+# The signing pipeline also canonicalizes newlines as a second safeguard for
+# ZIP downloads and editors that rewrite line endings.
+src/*.js text eol=lf
+tools/*.mjs text eol=lf
+manifest.json text eol=lf
+

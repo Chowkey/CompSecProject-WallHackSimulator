@@ -31,6 +31,10 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+function canonicalSource(source) {
+  return source.replace(/\r\n?/g, '\n');
+}
+
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 
@@ -344,7 +348,7 @@ section('6. Code signing');
   let allMatch = true;
   const stale = [];
   for (const [id, entry] of Object.entries(manifest.modules)) {
-    const source = await readFile(join(ROOT, entry.file), 'utf8');
+    const source = canonicalSource(await readFile(join(ROOT, entry.file), 'utf8'));
     const hmac = createHmac('sha256', manifest.key).update(source, 'utf8').digest('hex');
     if (hmac !== entry.hmac) { allMatch = false; stale.push(id); }
   }
@@ -352,7 +356,7 @@ section('6. Code signing');
     stale.length ? `stale: ${stale.join(', ')} — run node tools/sign.mjs` :
       `${Object.keys(manifest.modules).length} modules`);
 
-  const source = await readFile(join(ROOT, 'src/client.js'), 'utf8');
+  const source = canonicalSource(await readFile(join(ROOT, 'src/client.js'), 'utf8'));
   const tampered = createHmac('sha256', manifest.key)
     .update(`${source}\n// edited\n`, 'utf8').digest('hex');
   check('an edited module fails verification', tampered !== manifest.modules.client.hmac);
