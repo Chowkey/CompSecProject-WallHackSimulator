@@ -56,7 +56,16 @@
     return LEVELS[level] || LEVELS.system;
   }
 
-  function push(level, text, tick) {
+  /**
+   * `badge` is an optional short verdict chip rendered before the text -
+   * PASS, DETECT, BYPASS, ARMED and so on. It exists so the five defenses
+   * produce lines that can be compared down a column instead of read as five
+   * different sentences, which is what the terminal is for during grading.
+   *
+   * An empty-string badge reserves the same width without printing anything,
+   * so a multi-line evidence block stays aligned under its own verdict.
+   */
+  function push(level, text, tick, badge) {
     if (muted) return null;
     var entry = {
       seq: seq++,
@@ -64,6 +73,7 @@
       label: levelInfo(level).label,
       cls: levelInfo(level).cls,
       text: text,
+      badge: typeof badge === 'string' ? badge : null,
       tick: typeof tick === 'number' ? tick : null,
       t: typeof tick === 'number' ? tick / Sandbox.Protocol.TICK_HZ : null,
       wallMs: Date.now()
@@ -78,7 +88,14 @@
     var stamp = entry.t !== null
       ? '[t=' + entry.t.toFixed(2) + 's]'
       : '[t=  --  ]';
-    return stamp + '[' + entry.label + '] ' + entry.text;
+    var badge = entry.badge === null ? '' : '[' + pad(entry.badge, 7) + '] ';
+    return stamp + '[' + entry.label + '] ' + badge + entry.text;
+  }
+
+  function pad(text, width) {
+    var out = String(text);
+    while (out.length < width) out += ' ';
+    return out;
   }
 
   Sandbox.Log = {

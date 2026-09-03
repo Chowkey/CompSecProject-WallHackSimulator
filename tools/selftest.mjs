@@ -552,6 +552,89 @@ section('8. Keyboard focus guard');
 }
 
 /* ====================================================================== *
+ * 9. Defense log legibility
+ *
+ * The terminal is the part of this project a reviewer actually reads, so the
+ * five checks have to produce comparable output rather than five differently
+ * worded sentences: a verdict chip, a fixed-width name column, the evidence
+ * the check acted on, and - for a defeated defense - the lesson last.
+ * ====================================================================== */
+
+section('9. Defense log legibility');
+{
+  const captured = [];
+  const stop = S.Log.subscribe((e) => { if (e) captured.push(e); });
+  S.Log.setMuted(false);
+
+  const since = () => { const n = captured.length; return () => captured.slice(n); };
+  const TICK_IDS = ['checksum', 'hooks', 'modules', 'signing'];
+
+  S.attacker.setLevel(0);
+  S.defenses.list().forEach((d) => { d.enabled = false; d.lastOutcome = null; });
+
+  let mark = since();
+  TICK_IDS.forEach((id) => S.defenses.setEnabled(id, true));
+  const armed = mark();
+  check('arming a defense declares what it reads and what it cannot see',
+    TICK_IDS.every((id) => {
+      const d = S.defenses.get(id);
+      return armed.some((e) => e.badge === 'ARMED' && e.text.indexOf(d.name) === 0) &&
+        armed.some((e) => e.text.indexOf('READS') === 0) &&
+        armed.some((e) => e.text.indexOf('BLIND TO') === 0);
+    }),
+    `${armed.length} scope lines for ${TICK_IDS.length} defenses`);
+
+  mark = since();
+  await S.defenses.runAll(10);
+  const cleanRun = mark();
+  check('a clean run stamps every verdict with a PASS chip',
+    cleanRun.filter((e) => e.badge === 'PASS').length === TICK_IDS.length,
+    `${cleanRun.filter((e) => e.badge === 'PASS').length}/${TICK_IDS.length}`);
+
+  // Verdicts must appear in the defense panel's order, not in whatever order
+  // the asynchronous checks happened to settle.
+  const order = cleanRun.filter((e) => e.badge === 'PASS')
+    .map((e) => e.text.trim().split(/\s\s+/)[0]);
+  const wanted = TICK_IDS.map((id) => S.defenses.get(id).short.trim());
+  check('verdicts are printed in panel order, not promise-settle order',
+    JSON.stringify(order) === JSON.stringify(wanted), order.join(' → '));
+
+  // The point of Defense 4's evidence block: name every covered module.
+  const signEvidence = cleanRun.filter((e) => e.level === 'def-sign' && e.badge === '');
+  const signedIds = Object.keys(S.signing.manifest.modules)
+    .filter((id) => S.processMemory.modules[id]);
+  check('code signing names every module it covers, with its digest',
+    signedIds.every((id) => signEvidence.some((e) => e.text.indexOf(id) >= 0)) &&
+    signEvidence.some((e) => /bytes on disk, not the code now running/.test(e.text)),
+    `${signedIds.length} modules listed across ${signEvidence.length} evidence rows`);
+
+  mark = since();
+  S.attacker.setLevel(2);
+  await S.defenses.runAll(20);
+  const detected = mark();
+  check('a naive cheat turns the chips to DETECT and shows what changed',
+    detected.filter((e) => e.badge === 'DETECT').length >= 3 &&
+    detected.some((e) => e.level === 'def-sum' && /→/.test(e.text)),
+    `${detected.filter((e) => e.badge === 'DETECT').length} DETECT verdicts`);
+
+  mark = since();
+  S.defenses.list().forEach((d) => S.defenses.setBypass(d.id, true));
+  S.attacker.setLevel(3);
+  await S.defenses.runAll(30);
+  const bypassed = mark();
+  const firstBypass = bypassed.findIndex((e) => e.badge === 'BYPASS');
+  const firstLesson = bypassed.findIndex((e) => e.level === 'lesson');
+  check('a defeated defense reports BYPASS and explains itself afterwards',
+    firstBypass >= 0 && firstLesson > firstBypass,
+    `${bypassed.filter((e) => e.badge === 'BYPASS').length} bypassed, lesson follows the verdict`);
+
+  S.attacker.setLevel(0);
+  S.defenses.list().forEach((d) => { S.defenses.setBypass(d.id, false); d.enabled = false; });
+  S.Log.setMuted(true);
+  stop();
+}
+
+/* ====================================================================== *
 
  * ====================================================================== */
 

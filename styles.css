@@ -440,6 +440,25 @@ kbd {
 .log-label { flex: none; }
 .log-text { flex: 1; }
 
+/* Verdict chip. Fixed width so the five defenses read as one column, and an
+   empty variant so an evidence block stays indented under its verdict. */
+.log-badge {
+  flex: none;
+  width: 58px;
+  text-align: center;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  line-height: 1.35;
+}
+.log-badge.is-empty { border-color: transparent; background: none; }
+.bd-pass   { color: var(--visible);  border-color: rgba(65,209,127,0.35); background: rgba(65,209,127,0.08); }
+.bd-detect { color: #ffd76a;         border-color: rgba(240,192,64,0.45); background: rgba(240,192,64,0.12); }
+.bd-bypass { color: var(--wallhack); border-color: rgba(242,84,91,0.45);  background: rgba(242,84,91,0.12); }
+.bd-false  { color: #f0a860;         border-color: rgba(240,168,96,0.45); background: rgba(240,168,96,0.12); }
+.bd-armed  { color: #b79df2;         border-color: rgba(183,157,242,0.45); background: rgba(183,157,242,0.10); }
+
 .lv-system .log-label, .lv-system .log-text { color: #8b97ab; }
 .lv-server .log-label, .lv-server .log-text { color: #6fb4e8; }
 .lv-client .log-label, .lv-client .log-text { color: #86d5c0; }

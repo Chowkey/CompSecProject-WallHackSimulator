@@ -97,6 +97,46 @@ Roughly eight minutes, in the order that builds the argument.
 
 ---
 
+## Reading the terminal
+
+The five checks print into one comparable column rather than five differently worded
+sentences. Arming a defense first declares its own reach:
+
+```
+[DEF:sign] [ARMED ] Code signing — Authenticode / WinVerifyTrust on the image file
+[DEF:sign]          READS     the module bytes as fetched at load time, vs manifest.json
+[DEF:sign]          BLIND TO  every change made after those bytes were read — i.e. all of them
+```
+
+Stating the blind spot *before* the bypass exploits it is deliberate: the reviewer sees the
+limitation declared, then watches it exercised, which reads as an argument rather than a
+gotcha. Each run then prints a verdict chip, the name column, the cost, and the evidence the
+check actually acted on:
+
+```
+[DEF:sum ] [DETECT] Checksum      2/3 function hashes changed  ·  0.73ms
+[DEF:sum ]          client.renderMinimap ea8d9e…→9eb235… ✗
+[DEF:sum ]          client.renderMain    791046…→9844e1… ✗
+[DEF:sum ]          client.applyPacket   ad0262… ✓
+```
+
+Code signing names every module it covers with its digest, because a signature check that only
+says "all good" is indistinguishable from one that is not running — and what the green tick
+covers is the entire argument of that defense:
+
+```
+[DEF:sign] [DETECT] Code signing  1/6 modules FAIL: client  ·  0.72ms
+[DEF:sign]          rng    e5aa8e… ✓   protocol e4a73a… ✓   log       269eaf… ✓
+[DEF:sign]          client c5469d… ✗ HMAC mismatch          education 721213… ✓
+[DEF:sign]          verified against manifest.json fetched at 06:53:46 — these are the
+[DEF:sign]          bytes on disk, not the code now running
+```
+
+Chips are `ARMED`, `PASS`, `DETECT`, `BYPASS` and `FALSE+`. On a `BYPASS` the verdict comes
+first, then the evidence showing the check genuinely believes itself, then the `LESSON` line
+explaining why it never could have worked. Verdicts are emitted in defense-panel order, not in
+the order the asynchronous checks happen to settle, so they line up down the column.
+
 ## Layout
 
 ```

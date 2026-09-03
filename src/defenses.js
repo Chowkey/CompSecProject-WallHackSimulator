@@ -94,6 +94,11 @@
       logLevel: spec.logLevel,
       entry: spec.entry,            // export name the runner dispatches through
       realWorld: spec.realWorld,
+      // What the check actually inspects, and what it structurally cannot see.
+      // Printed to the terminal the moment a defense is switched on, so the
+      // limitation is on the record before the bypass demonstrates it.
+      reads: spec.reads,
+      blind: spec.blind,
       bypassName: spec.bypassName,
       bypassLesson: spec.bypassLesson,
       enabled: false,
@@ -110,6 +115,8 @@
   var defenses = [
     makeDefense({
       id: 'checksum',
+      reads: 'fn.toString() of the 3 watched render functions',
+      blind: 'a toString that has been taught to answer with the original text',
       name: 'Code checksum',
       short: 'Checksum',
       logLevel: 'def-sum',
@@ -123,6 +130,8 @@
     }),
     makeDefense({
       id: 'hooks',
+      reads: 'identity, name and arity of the 3 watched exports',
+      blind: 'a cheat that unhooks itself for the duration of this call',
       name: 'Hook detection',
       short: 'Hook detect',
       logLevel: 'def-hook',
@@ -135,6 +144,8 @@
     }),
     makeDefense({
       id: 'modules',
+      reads: 'the module table, the private region list and the global object',
+      blind: 'code appended inside a module region that is already registered',
       name: 'Module enumeration',
       short: 'Module enum',
       logLevel: 'def-mod',
@@ -148,6 +159,8 @@
     }),
     makeDefense({
       id: 'signing',
+      reads: 'the module bytes as fetched at load time, vs manifest.json',
+      blind: 'every change made after those bytes were read — i.e. all of them',
       name: 'Code signing',
       short: 'Code signing',
       logLevel: 'def-sign',
@@ -160,6 +173,8 @@
     }),
     makeDefense({
       id: 'challenge',
+      reads: 'one random 256-byte slice of one random module, per challenge',
+      blind: 'a cheat answering from a pristine copy it captured before hooking',
       name: 'Challenge-response',
       short: 'Challenge-resp',
       logLevel: 'def-chal',
@@ -212,13 +227,23 @@
         }
       });
 
-      var sample = results[0];
-      var detail = mismatches.length
-        ? mismatches.length + ' function(s) changed: ' + mismatches.join(', ')
-        : 'all ' + results.length + ' hashes match (' +
-          (sample && sample.hex ? 'renderMinimap=' + Hash.short(sample.hex) : '') + ')';
+      // The evidence is the hashes themselves. Printing all of them is the
+      // point: a reviewer can watch a specific digest change the instant the
+      // hook goes in, and watch it stop changing once the bypass is armed.
+      var evidence = results.map(function (r) {
+        if (r.missing) return r.key + ' MISSING';
+        var expected = baselineHashes.get(r.key);
+        if (expected && expected !== r.hex) {
+          return r.key + ' ' + Hash.short(expected) + '→' + Hash.short(r.hex) + ' ✗';
+        }
+        return r.key + ' ' + Hash.short(r.hex) + ' ✓';
+      });
 
-      return { alarm: mismatches.length > 0, detail: detail };
+      var detail = mismatches.length
+        ? mismatches.length + '/' + results.length + ' function hashes changed'
+        : results.length + '/' + results.length + ' function hashes match baseline';
+
+      return { alarm: mismatches.length > 0, detail: detail, evidence: evidence };
     });
   }
 
@@ -253,8 +278,11 @@
     return Promise.resolve({
       alarm: findings.length > 0,
       detail: findings.length
-        ? findings.join(', ')
-        : WATCHED.length + ' references identical to originals'
+        ? findings.length + '/' + WATCHED.length + ' references replaced'
+        : WATCHED.length + '/' + WATCHED.length + ' references identical to originals',
+      evidence: findings.length ? findings : WATCHED.map(function (entry) {
+        return key(entry) + ' ✓';
+      })
     });
   }
 
@@ -300,12 +328,17 @@
       }
     }
 
-    var scanned = Object.keys(pm.modules).length + Object.keys(pm.private).length;
+    var mods = Object.keys(pm.modules);
+    var priv = Object.keys(pm.private);
     return Promise.resolve({
       alarm: findings.length > 0,
       detail: findings.length
-        ? findings.join(', ')
-        : 'scanned ' + scanned + ' regions, all accounted for by the module table'
+        ? findings.length + ' unaccounted region(s) found'
+        : mods.length + ' modules + ' + priv.length + ' private regions, all accounted for',
+      evidence: findings.length ? findings : [
+        'modules  ' + mods.join(' '),
+        'private  ' + (priv.length ? priv.join(' ') : '(none)')
+      ]
     });
   }
 
@@ -333,18 +366,36 @@
         return Promise.resolve({ id: id, ok: true, reason: 'no file copy (inline module)' });
       }
       return Hash.hmacSha256Hex(manifest.key, mod.fileSource).then(function (sig) {
-        return { id: id, ok: sig === expected.hmac, reason: sig === expected.hmac ? '' : 'HMAC mismatch' };
+        var ok = sig === expected.hmac;
+        return { id: id, ok: ok, sig: sig, reason: ok ? '' : 'HMAC mismatch' };
       });
     });
 
     return Promise.all(jobs).then(function (results) {
       var bad = results.filter(function (r) { return !r.ok; });
+
+      // Per-module HMACs, three to a row. A signature check that only reports
+      // "all good" is indistinguishable from one that is not running at all,
+      // and the whole argument of this defense is about what the green tick
+      // actually covers - so the covered files are named, one by one.
+      var rows = [];
+      for (var i = 0; i < results.length; i += 3) {
+        rows.push(results.slice(i, i + 3).map(function (r) {
+          return padTo(r.id, 10) + ' ' +
+            (r.sig ? Hash.short(r.sig) : '—') + (r.ok ? ' ✓' : ' ✗ ' + r.reason);
+        }).join('   '));
+      }
+      rows.push('verified against manifest.json fetched at ' +
+        new Date(Sandbox.signing.verifiedAt).toISOString().slice(11, 19) +
+        ' — these are the bytes on disk, not the code now running');
+
       return {
         alarm: bad.length > 0,
         detail: bad.length
-          ? bad.map(function (r) { return r.id + ': ' + r.reason; }).join(', ')
-          : results.length + ' modules match manifest (as fetched at ' +
-            new Date(Sandbox.signing.verifiedAt).toISOString().slice(11, 19) + ')'
+          ? bad.length + '/' + results.length + ' modules FAIL: ' +
+            bad.map(function (r) { return r.id; }).join(', ')
+          : results.length + '/' + results.length + ' modules match manifest',
+        evidence: rows
       };
     });
   }
@@ -437,29 +488,73 @@
     return outcome;
   }
 
-  function reportOutcome(defense, outcome, detail, ms, tick) {
+  function padTo(text, width) {
+    var out = String(text);
+    while (out.length < width) out += ' ';
+    return out;
+  }
+
+  // One chip per outcome, so five different checks produce one comparable
+  // column in the terminal rather than five differently-worded sentences.
+  var BADGE = {
+    detected: 'DETECT',
+    missed: 'BYPASS',
+    'false-positive': 'FALSE+',
+    clean: 'PASS'
+  };
+
+  /**
+   * What a defense can and cannot see, printed the moment it is switched on.
+   *
+   * Stating the blind spot before the bypass exploits it is the honest order to
+   * present this in: the reviewer sees that the limitation was known and
+   * declared, and then watches it be exercised. It reads as an argument rather
+   * than as a gotcha.
+   */
+  function logScope(defense) {
+    if (Log.isMuted() || !defense.reads) return;
+    Log.push(defense.logLevel, defense.name + ' — ' + defense.realWorld, null, 'ARMED');
+    Log.push(defense.logLevel, 'READS     ' + defense.reads, null, '');
+    Log.push(defense.logLevel, 'BLIND TO  ' + defense.blind, null, '');
+  }
+
+  function reportOutcome(defense, outcome, detail, ms, tick, evidence) {
     var changed = defense.lastOutcome !== outcome;
     defense.lastOutcome = outcome;
     defense.lastDetail = detail;
 
     if (Log.isMuted()) return;
 
+    // Evidence is verbose, so it is printed when the verdict changes rather
+    // than on every one of the two checks per second.
+    var showEvidence = changed && evidence && evidence.length;
+
     if (outcome === 'detected') {
       if (changed) {
-        Log.push('alert', '⚠ ' + defense.name + ' DETECTED tampering — ' + detail +
-          ' · ' + ms.toFixed(2) + 'ms', tick);
+        Log.push('alert', padTo(defense.short, 14) + detail +
+          '  ·  ' + ms.toFixed(2) + 'ms', tick, 'DETECT');
       }
     } else if (outcome === 'missed') {
       if (changed) {
-        Log.push('alert', '⚠ FALSE NEGATIVE — ' + defense.name + ' reports clean, but the ' +
-          'client is tampered. Bypass: ' + defense.bypassName, tick);
-        Log.lesson(defense.bypassLesson, tick);
+        Log.push('alert', padTo(defense.short, 14) + 'reports clean while the client is ' +
+          'tampered  ·  bypass: ' + defense.bypassName, tick, 'BYPASS');
       }
     } else if (outcome === 'false-positive') {
-      Log.push('alert', '⚠ FALSE POSITIVE — ' + defense.name + ': ' + detail, tick);
+      Log.push('alert', padTo(defense.short, 14) + detail, tick, 'FALSE+');
     } else if (changed) {
-      Log.push(defense.logLevel, detail + ' ✓ · ' + ms.toFixed(2) + 'ms', tick);
+      Log.push(defense.logLevel, padTo(defense.short, 14) + detail +
+        '  ·  ' + ms.toFixed(2) + 'ms', tick, 'PASS');
     }
+
+    if (showEvidence) {
+      for (var i = 0; i < evidence.length; i++) {
+        Log.push(defense.logLevel, evidence[i], tick, '');
+      }
+    }
+
+    // The lesson comes last, after the reader has seen the verdict and the
+    // evidence that the check genuinely believes itself.
+    if (outcome === 'missed' && changed) Log.lesson(defense.bypassLesson, tick);
   }
 
   /**
@@ -489,12 +584,21 @@
       jobs.push(job.then(function (result) {
         var ms = now() - started;
         defense.stats.totalMs += ms;
-        var outcome = scoreOutcome(defense, result.alarm);
-        reportOutcome(defense, outcome, result.detail, ms, tick);
+        return { defense: defense, result: result, ms: ms };
       }));
     });
 
-    return Promise.all(jobs);
+    // Score and report only once every check has settled, walking the list in
+    // the defense panel's own order. Reporting as each promise resolves put the
+    // five verdicts on screen in a different sequence every run, which makes
+    // them impossible to compare down a column.
+    return Promise.all(jobs).then(function (rows) {
+      rows.forEach(function (row) {
+        var outcome = scoreOutcome(row.defense, row.result.alarm);
+        reportOutcome(row.defense, outcome, row.result.detail, row.ms, tick,
+          row.result.evidence);
+      });
+    });
   }
 
   /**
@@ -558,7 +662,15 @@
     nativeToString: nativeToString,
     WATCHED: WATCHED,
     setEnabled: function (id, value) {
-      if (byId[id]) byId[id].enabled = !!value;
+      var defense = byId[id];
+      if (!defense) return;
+      var wasEnabled = defense.enabled;
+      defense.enabled = !!value;
+      // Declare the check's reach the moment it is armed, once per arming.
+      if (defense.enabled && !wasEnabled) {
+        defense.lastOutcome = null;   // so the next run prints its evidence
+        logScope(defense);
+      }
     },
     setBypass: function (id, value) {
       if (byId[id]) byId[id].bypassEnabled = !!value;

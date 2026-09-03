@@ -49,6 +49,14 @@
 
     line.appendChild(stamp);
     line.appendChild(label);
+    // A verdict chip, so the five defenses line up in one readable column.
+    // An empty badge reserves the same width, keeping an evidence block
+    // indented underneath the verdict it belongs to.
+    if (entry.badge !== null && entry.badge !== undefined) {
+      var badge = make('span', 'log-badge' + (entry.badge ? ' bd-' +
+        entry.badge.toLowerCase().replace(/[^a-z]/g, '') : ' is-empty'), entry.badge);
+      line.appendChild(badge);
+    }
     line.appendChild(text);
     el.terminal.appendChild(line);
     terminalNodes++;
