@@ -18,7 +18,8 @@
  *
  * THREE LEVELS
  *   1  Passive read   - reads clientState, changes nothing
- *   2  Wallhack       - hooks renderMinimap, draws what the fog should hide
+ *   2  Wallhack       - hooks renderMain and renderMinimap, draws what the fog
+ *                      should hide: enemy silhouettes straight through walls
  *   3  Evasive        - level 2 plus whichever bypasses are switched on
  *
  * The bypass checkboxes only take effect at level 3. At levels 1 and 2 the
@@ -39,6 +40,7 @@
   // loader verified the modules but before anything else touched them.
   var original = {
     renderMinimap: clientRegion.exports.renderMinimap,
+    renderMain: clientRegion.exports.renderMain,
     checkHooks: defenseRegion.exports.checkHooks,
     answerChallenge: defenseRegion.exports.answerChallenge,
     functionToString: Function.prototype.toString,
@@ -114,6 +116,134 @@
     return drawn;
   }
 
+  /**
+   * The same payload, drawn into the first-person view - a conventional ESP
+   * overlay: corner-bracketed bounding box, tracer line, and range readout.
+   *
+   * The only line that makes it a wallhack is the one that skips the depth
+   * test, so a target standing behind a wall is painted over the wall instead
+   * of being clipped by it. Everything else here is ordinary presentation. That
+   * is the uncomfortable part of the lesson: the cheat is not defeating a
+   * check, it is drawing data it was handed, and drawing is the client's job.
+   *
+   * The camera comes from clientState, where the client leaves it each frame.
+   * Reading the view transform out of the client's own memory is exactly how a
+   * real overlay projects world positions onto the screen; there is nothing to
+   * defeat here, because the data is already on this side of the boundary.
+   *
+   * Targets the player can legitimately see are boxed too, in green and without
+   * a tracer. That is deliberate: under CULLING = STRICT the overlay keeps
+   * running at full strength and every box it can draw is one the player could
+   * already see unaided. The cheat is not switched off in that demo - it is
+   * starved.
+   *
+   * It deliberately does not touch stats.hiddenRevealed: the minimap payload
+   * already counts each hidden entity once per frame, and counting it twice
+   * would inflate the number this project reports.
+   */
+  function drawHiddenEntities3D(ctx, camera, state, palette) {
+    if (!camera || typeof camera.project !== 'function') return 0;
+
+    // Far to near, so a closer target is painted over a further one.
+    var list = state.entities.slice().sort(function (a, b) {
+      var da = (a.x - camera.px) * (a.x - camera.px) + (a.y - camera.py) * (a.y - camera.py);
+      var db = (b.x - camera.px) * (b.x - camera.px) + (b.y - camera.py) * (b.y - camera.py);
+      return db - da;
+    });
+
+    var drawn = 0;
+    for (var i = 0; i < list.length; i++) {
+      var e = list[i];
+      var p = camera.project(e.x, e.y);
+      if (!p) continue;
+
+      var throughWall = !e.visible;
+      var colour = throughWall
+        ? (e.leaked ? palette.leaked : palette.wallhack)
+        : palette.visible;
+      var range = Math.sqrt((e.x - camera.px) * (e.x - camera.px) +
+                            (e.y - camera.py) * (e.y - camera.py));
+
+      if (throughWall) {
+        // The whole wallhack, in one call: draw the silhouette ignoring the
+        // depth buffer the renderer just built.
+        camera.drawFigure(ctx, p.x, p.top, p.height, colour);
+        drawTracer(ctx, camera, p, colour);
+        drawn++;
+      }
+
+      drawBox(ctx, p, colour, throughWall);
+      drawTag(ctx, p, e.id + '  ' + range.toFixed(1) + 'm', colour, throughWall);
+    }
+
+    drawEspStatus(ctx, state, drawn);
+    return drawn;
+  }
+
+  /**
+   * The overlay's own status line, drawn by the cheat rather than by the game.
+   *
+   * It earns its place in the demo twice over. It proves the overlay is running
+   * - so a screen with no boxes on it is a screen with nothing to box, not a
+   * broken cheat - and under CULLING = STRICT it sits there reading "0 through
+   * walls" for as long as anyone cares to watch, which is the entire argument
+   * of this project rendered as one line of text.
+   */
+  function drawEspStatus(ctx, state, drawn) {
+    var mode = state.meta ? state.meta.cullingMode : '?';
+    var hidden = 0;
+    for (var i = 0; i < state.entities.length; i++) {
+      if (!state.entities[i].visible) hidden++;
+    }
+    ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.fillStyle = drawn > 0 ? 'rgba(242,84,91,0.95)' : 'rgba(242,84,91,0.55)';
+    ctx.fillText('ESP ACTIVE  ·  ' + drawn + ' drawn through walls  ·  ' +
+      hidden + ' hidden in packet  ·  culling=' + mode, 12, 20);
+  }
+
+  // Corner brackets rather than a closed rectangle - it stays readable over a
+  // busy wall without hiding the target inside it.
+  function drawBox(ctx, p, colour, emphatic) {
+    var w = p.height * 0.44;
+    var x0 = p.x - w / 2, y0 = p.top, x1 = p.x + w / 2, y1 = p.top + p.height;
+    var arm = Math.max(3, Math.min(w, p.height) * 0.28);
+
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = emphatic ? 1.6 : 1;
+    ctx.globalAlpha = emphatic ? 1 : 0.45;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0 + arm); ctx.lineTo(x0, y0); ctx.lineTo(x0 + arm, y0);
+    ctx.moveTo(x1 - arm, y0); ctx.lineTo(x1, y0); ctx.lineTo(x1, y0 + arm);
+    ctx.moveTo(x1, y1 - arm); ctx.lineTo(x1, y1); ctx.lineTo(x1 - arm, y1);
+    ctx.moveTo(x0 + arm, y1); ctx.lineTo(x0, y1); ctx.lineTo(x0, y1 - arm);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  // The snap line an ESP draws from the bottom of the screen to the target.
+  function drawTracer(ctx, camera, p, colour) {
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.35;
+    ctx.beginPath();
+    ctx.moveTo(camera.W / 2, camera.H);
+    ctx.lineTo(p.x, p.top + p.height);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  function drawTag(ctx, p, label, colour, emphatic) {
+    ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
+    // measureText is absent from the headless canvas shim, so fall back to an
+    // estimate rather than throwing during the boot test.
+    var metrics = ctx.measureText && ctx.measureText(label);
+    var width = (metrics && metrics.width) || label.length * 6;
+    ctx.fillStyle = colour;
+    ctx.globalAlpha = emphatic ? 0.95 : 0.5;
+    ctx.fillText(label, p.x - width / 2, p.top - 5);
+    ctx.globalAlpha = 1;
+  }
+
   /* ====================================================================== *
    * Hook installation
    * ====================================================================== */
@@ -139,13 +269,33 @@
     };
     Object.defineProperty(hook, 'length', { value: original.renderMinimap.length });
 
+    // The same treatment for the first-person view. Two hooked functions rather
+    // than one changes nothing about what the defenses can prove - the oracle
+    // fact is still simply "functions are hooked" - but it makes the point that
+    // a cheat hooks wherever the data is drawn, and the defender has to guess
+    // the whole list in advance.
+    var hook3d = function renderMain(ctx) {
+      original.renderMain(ctx);
+
+      if (installed.mapped) return;   // already ran inside the world pipeline
+
+      var state = Sandbox.clientState;
+      var camera = state.lastCamera;   // left there by the client each frame
+      if (!camera) return;             // top-down view: nothing to project onto
+      var payload = pm.private.__cheat_overlay3d;
+      if (payload) payload(ctx, camera, state, Sandbox.client.PALETTE);
+    };
+    Object.defineProperty(hook3d, 'length', { value: original.renderMain.length });
+
     clientRegion.exports.renderMinimap = hook;
+    clientRegion.exports.renderMain = hook3d;
     installed.renderHook = true;
   }
 
   function removeRenderHook() {
     if (!installed.renderHook) return;
     clientRegion.exports.renderMinimap = original.renderMinimap;
+    clientRegion.exports.renderMain = original.renderMain;
     installed.renderHook = false;
   }
 
@@ -156,8 +306,14 @@
   function installToStringSpoof() {
     if (installed.toStringSpoof) return;
 
+    // Every hooked function needs an entry, or Defense 1 catches the one that
+    // was forgotten. That is the realistic failure mode for this bypass: it is
+    // not hard, it is just book-keeping the attacker has to get exhaustively
+    // right, and the defender only has to find one omission.
     spoofedSource.set(clientRegion.exports.renderMinimap,
       original.functionToString.call(original.renderMinimap));
+    spoofedSource.set(clientRegion.exports.renderMain,
+      original.functionToString.call(original.renderMain));
 
     Function.prototype.toString = function () {
       if (spoofedSource.has(this)) return spoofedSource.get(this);
@@ -210,6 +366,7 @@
     // registered module. Nothing new appears in the module table and no
     // unbacked executable region exists for the scan to find.
     clientRegion.renderPipeline.push(drawHiddenEntities);
+    clientRegion.worldPipeline.push(drawHiddenEntities3D);
     installed.mapped = true;
 
     Log.cheat('payload manually mapped into the client module region — no new ' +
@@ -220,6 +377,8 @@
     if (!installed.mapped) return;
     var i = clientRegion.renderPipeline.indexOf(drawHiddenEntities);
     if (i >= 0) clientRegion.renderPipeline.splice(i, 1);
+    var j = clientRegion.worldPipeline.indexOf(drawHiddenEntities3D);
+    if (j >= 0) clientRegion.worldPipeline.splice(j, 1);
     installed.mapped = false;
   }
 
@@ -230,6 +389,7 @@
 
   function removePrivateRegion() {
     delete pm.private.__cheat_overlay;
+    delete pm.private.__cheat_overlay3d;
     delete pm.private.__cheat_reader;
     installed.privateRegion = false;
   }
@@ -350,8 +510,8 @@
       return;
     }
 
-    // Levels 2 and 3 both hook the minimap. Capture the clean source first -
-    // once the hook is in, the original is gone.
+    // Levels 2 and 3 both hook the render path. Capture the clean source first
+    // - once the hooks are in, the originals are gone.
     captureSourceCache();
 
     var evadeModules = bypassOn('modules');
@@ -361,6 +521,7 @@
       installMapped();
     } else {
       installPrivateRegion('__cheat_overlay', drawHiddenEntities);
+      installPrivateRegion('__cheat_overlay3d', drawHiddenEntities3D);
       installGlobalArtifact();
     }
 

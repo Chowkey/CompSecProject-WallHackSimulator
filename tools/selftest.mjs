@@ -364,6 +364,194 @@ section('6. Code signing');
 }
 
 /* ====================================================================== *
+ * 7. First-person rendering
+ *
+ * The 3D view carries the demo, so its two load-bearing properties need to
+ * stay under test: the projection has to be geometrically right, and the
+ * wallhack has to reach it by both of the routes the attacker can take. A
+ * recording canvas is used rather than a no-op one, so the checks can count
+ * what was actually drawn and in which colour.
+ * ====================================================================== */
+
+section('7. First-person rendering');
+{
+  const recorder = () => {
+    const ops = [];
+    const ctx = {
+      canvas: { width: 800, height: 500 },
+      fillStyle: '', strokeStyle: '', lineWidth: 1, font: '', globalAlpha: 1,
+      fillRect: (x, y, w, h) => ops.push({ op: 'rect', x, y, w, h, fill: ctx.fillStyle }),
+      arc: () => ops.push({ op: 'arc', fill: ctx.fillStyle }),
+      strokeRect: () => {}, fillText: () => {}, beginPath: () => {}, closePath: () => {},
+      fill: () => {}, stroke: () => {}, moveTo: () => {}, lineTo: () => {}, rect: () => {},
+      clip: () => {}, save: () => {}, restore: () => {}
+    };
+    return { ctx, ops };
+  };
+
+  const PAL = S.client.PALETTE;
+  const st = S.clientState;
+  const draw = () => {
+    const { ctx, ops } = recorder();
+    clientExports().renderMain(ctx);
+    return {
+      slices: ops.filter((o) => o.op === 'rect' && o.w <= 4 && o.h > 0),
+      red: ops.filter((o) => o.op === 'arc' && o.fill === PAL.wallhack).length,
+      yellow: ops.filter((o) => o.op === 'arc' && o.fill === PAL.leaked).length
+    };
+  };
+
+  S.attacker.setLevel(0);
+  S.client.setViewMode('3D');
+  const core = S.ServerCore.create((m) => {
+    if (m.type === P.READY) S.client.applyWorld(m);
+    if (m.type === P.PACKET) S.client.applyPacket(m);
+  });
+  core.handle({ type: P.INIT, seed: 'valorant', cullingMode: P.CULLING.NONE });
+  core.handle({ type: P.STEP, count: 40 });
+
+  const clean = draw();
+  const heights = clean.slices.map((s) => s.h);
+  check('raycaster draws a wall column per ray',
+    clean.slices.length > 100, `${clean.slices.length} slices`);
+  check('wall height varies with distance',
+    heights.length > 0 && Math.max(...heights) > Math.min(...heights) * 3,
+    `${Math.min(...heights).toFixed(0)}px .. ${Math.max(...heights).toFixed(0)}px`);
+
+  // A target the camera looks straight at must land in the middle of the screen,
+  // and the depth buffer must place it in front of or behind the wall correctly.
+  const target = st.entities.find((e) => !e.visible) || st.entities[0];
+  st.camera.yaw = Math.atan2(target.y - st.player.y, target.x - st.player.x);
+  draw();
+  const proj = st.lastCamera.project(target.x, target.y);
+  check('projection centres a target the camera aims at',
+    proj && Math.abs(proj.x - 400) < 3 && proj.height > 0,
+    proj ? `x=${proj.x.toFixed(1)} of 800, height=${proj.height.toFixed(0)}px` : 'did not project');
+
+  const behindWall = !S.client.lineOfSight(st.player.x, st.player.y, target.x, target.y);
+  check('the chosen target really is behind a wall', behindWall);
+
+  check('honest client draws nothing it was not shown', draw().red === 0);
+
+  S.attacker.setLevel(2);
+  check('level 2 draws the hidden target through the wall', draw().red > 0);
+
+  S.defenses.list().forEach((d) => S.defenses.setBypass(d.id, true));
+  S.attacker.setLevel(3);
+  const mapped = draw();
+  check('manual mapping reaches the 3D view through worldPipeline',
+    mapped.red > 0 && S.processMemory.modules.client.worldPipeline.length === 1,
+    `${mapped.red} drawn, ${S.processMemory.modules.client.worldPipeline.length} mapped stage`);
+
+  // The claim the whole project rests on, restated in the renderer: with the
+  // server culling strictly there is nothing for the payload to draw.
+  core.handle({ type: P.SET_CULLING, mode: P.CULLING.STRICT });
+  core.handle({ type: P.STEP, count: 30 });
+  const strict = draw();
+  check('STRICT: the fully evasive cheat has nothing to draw',
+    strict.red + strict.yellow === 0,
+    `${st.entities.filter((e) => !e.visible).length} hidden entities in packet`);
+
+  S.attacker.setLevel(0);
+  check('uninstalling clears both overlay routes',
+    S.processMemory.modules.client.worldPipeline.length === 0 &&
+    S.processMemory.modules.client.renderPipeline.length === 0 && draw().red === 0);
+  S.defenses.list().forEach((d) => S.defenses.setBypass(d.id, false));
+
+  // The overlay is a conventional ESP: bracketed box, tracer, range readout.
+  // Recorded as vector paths so each element can be told apart - a corner box
+  // is 4 moveTo + 8 lineTo, while the client's own crosshair is 4 + 4.
+  const espShot = () => {
+    const ops = [];
+    let cur = [];
+    const ctx = {
+      canvas: { width: 800, height: 500 },
+      fillStyle: '', strokeStyle: '', lineWidth: 1, font: '', globalAlpha: 1,
+      fillRect: () => {}, strokeRect: () => {}, arc: () => {},
+      fillText: (t) => ops.push({ op: 'text', t }),
+      beginPath: () => { cur = []; },
+      moveTo: (x, y) => cur.push(['M', Math.round(x), Math.round(y)]),
+      lineTo: (x, y) => cur.push(['L', Math.round(x), Math.round(y)]),
+      stroke: () => ops.push({ op: 'stroke', pts: cur.slice() }),
+      closePath: () => {}, fill: () => {}, rect: () => {}, clip: () => {},
+      save: () => {}, restore: () => {}
+    };
+    clientExports().renderMain(ctx);
+    const n = (o, k) => o.pts.filter((p) => p[0] === k).length;
+    return {
+      boxes: ops.filter((o) => o.op === 'stroke' && n(o, 'M') === 4 && n(o, 'L') === 8).length,
+      tracers: ops.filter((o) => o.op === 'stroke' && o.pts.length === 2 &&
+        o.pts[0][1] === 400 && o.pts[0][2] === 500).length,
+      tags: ops.filter((o) => o.op === 'text' && /npc-.*m$/.test(o.t)).length,
+      status: ops.filter((o) => o.op === 'text' && /^ESP ACTIVE/.test(o.t)).length
+    };
+  };
+
+  core.handle({ type: P.SET_CULLING, mode: P.CULLING.NONE });
+  core.handle({ type: P.STEP, count: 30 });
+  const aim = st.entities.find((e) => !e.visible);
+  if (aim) st.camera.yaw = Math.atan2(aim.y - st.player.y, aim.x - st.player.x);
+
+  S.attacker.setLevel(0);
+  const noEsp = espShot();
+  check('honest client draws no ESP furniture',
+    noEsp.boxes === 0 && noEsp.tracers === 0 && noEsp.tags === 0);
+
+  S.attacker.setLevel(2);
+  const esp = espShot();
+  check('the cheat draws a bounding box, a tracer and a range on its targets',
+    esp.boxes > 0 && esp.tracers > 0 && esp.tags > 0,
+    `${esp.boxes} boxes, ${esp.tracers} tracers, ${esp.tags} range tags`);
+
+  core.handle({ type: P.SET_CULLING, mode: P.CULLING.STRICT });
+  core.handle({ type: P.STEP, count: 30 });
+  const starved = espShot();
+  check('STRICT starves the ESP rather than switching it off',
+    starved.tracers === 0 && starved.status === 1,
+    'overlay still installed and still drawing its status line, with nothing hidden left to draw');
+  S.attacker.setLevel(0);
+}
+
+/* ====================================================================== *
+ * 8. Keyboard focus guard
+ *
+ * Regression guard for a bug that made the demo look broken: the first version
+ * ignored every key whenever any form control had focus, so using one dropdown
+ * silently disabled looking around for the rest of the session. A focused
+ * element may only claim the keys it genuinely needs.
+ * ====================================================================== */
+
+section('8. Keyboard focus guard');
+{
+  const claims = S.client.claimsKey;
+  const el = (tagName, type) => ({ tagName, type: type || '' });
+
+  const cases = [
+    ['typing a seed keeps every letter', el('INPUT', 'text'), 'e', true],
+    ['typing a seed keeps the arrows', el('INPUT', 'text'), 'ArrowRight', true],
+    ['a textarea keeps every key', el('TEXTAREA'), 'w', true],
+    ['a dropdown keeps the arrows it uses', el('SELECT'), 'ArrowRight', true],
+    ['a dropdown does NOT keep the turn keys', el('SELECT'), 'e', false],
+    ['a dropdown does NOT keep the movement keys', el('SELECT'), 'w', false],
+    ['a slider keeps the arrows', el('INPUT', 'range'), 'ArrowLeft', true],
+    ['a slider does NOT keep the turn keys', el('INPUT', 'range'), 'q', false],
+    ['a checkbox claims nothing', el('INPUT', 'checkbox'), 'ArrowRight', false],
+    ['a button claims nothing', el('BUTTON'), 'ArrowRight', false],
+    ['the page body claims nothing', el('BODY'), 'w', false]
+  ];
+
+  let wrong = [];
+  for (const [name, target, key, expected] of cases) {
+    if (claims(target, key) !== expected) wrong.push(name);
+  }
+  check('a focused widget only claims the keys it needs', wrong.length === 0,
+    wrong.length ? `wrong: ${wrong.join('; ')}` : `${cases.length} cases`);
+
+  check('mouse look can be toggled from the keyboard',
+    typeof S.client.togglePointerLock === 'function');
+}
+
+/* ====================================================================== *
 
  * ====================================================================== */
 

@@ -141,10 +141,18 @@
         'Note also what the sandbox measures before any bypass is armed: a single ' +
         'challenge covers one random slice of one random module, so it catches an ' +
         'unprepared hook only when it happens to sample the bytes that changed - ' +
-        'around 17% of the time in this configuration. Detection is a coverage ' +
+        'around 37% of the time in this configuration. Detection is a coverage ' +
         'fraction, not a certainty. It is reliable across a session and unreliable ' +
         'in any one check, which is the general behaviour of every rotating partial ' +
         'integrity check, including the ones that hash a subset of .text per pass.',
+        'That percentage is a property of the cheat, not of the check. It is the ' +
+        'fraction of the module the attacker had to modify. An earlier build of ' +
+        'this sandbox hooked one render function and measured around 17%; hooking ' +
+        'a second one to reach the first-person view roughly doubled it, with the ' +
+        'challenge size and the defense left untouched. The defender therefore ' +
+        'does not get to choose this number - the attacker does, by being ' +
+        'economical. A cheat with a smaller footprint is proportionally harder for ' +
+        'any partial integrity check to sample.',
         'What survives the pristine-cache bypass is cost. Answering indirectly takes ' +
         'measurably longer, and that is not something the client can fake downwards ' +
         '- it can only add delay, never remove it. The server builds a latency ' +

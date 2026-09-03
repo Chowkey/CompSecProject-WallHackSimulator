@@ -56,10 +56,24 @@
     document.head.appendChild(script);
   }
 
+  // One token per page load, appended to every dynamically inserted script.
+  //
+  // This is not incidental plumbing - it fixes a bug worth recording. Modules
+  // are fetched with cache: 'no-store' and then verified against the manifest,
+  // so a stale copy of one fails loudly and immediately. attacker.js is loaded
+  // through a script tag and is deliberately unsigned, which meant a browser
+  // could quietly serve a cached older build of it: the page looked correct,
+  // every signature still verified, and only the cheat behaved like an earlier
+  // version of itself.
+  //
+  // That is Defense 4's lesson landing on this project's own code. The file
+  // nobody verifies is the file whose version nobody can be sure of.
+  var CACHE_TOKEN = String(Date.now());
+
   function loadScriptTag(url) {
     return new Promise(function (resolve, reject) {
       var script = document.createElement('script');
-      script.src = url;
+      script.src = url + (url.indexOf('?') < 0 ? '?' : '&') + 'v=' + CACHE_TOKEN;
       script.onload = resolve;
       script.onerror = function () { reject(new Error('failed to load ' + url)); };
       document.head.appendChild(script);
@@ -150,7 +164,9 @@
   function connectServer(onMessage) {
     if (location.protocol === 'file:') return connectInProcess(onMessage);
     try {
-      var worker = new Worker('src/server.js');
+      // Same reasoning as loadScriptTag: server.js is unsigned too, so a cached
+      // copy would go unnoticed.
+      var worker = new Worker('src/server.js?v=' + CACHE_TOKEN);
       worker.onmessage = function (event) { onMessage(event.data); };
       worker.onerror = function () {
         boot('Worker failed to start; falling back to same-thread server');
@@ -282,8 +298,19 @@
   var canvases = {};
   var renderPaused = false;
 
-  function renderFrame() {
+  var lastFrameAt = 0;
+
+  function renderFrame(now) {
+    var dt = lastFrameAt ? (now || 0) - lastFrameAt : 16;
+    lastFrameAt = now || 0;
+
     if (!renderPaused && Sandbox.clientState && Sandbox.clientState.ready) {
+      // Turning integrates over time, so it belongs on the frame clock rather
+      // than on key events. Called through Sandbox.client rather than the
+      // module exports table: it is camera plumbing, not something a defense
+      // watches or a cheat has any reason to hook.
+      if (Sandbox.client.updateCamera) Sandbox.client.updateCamera(dt);
+
       var exportsTable = clientExports();
       if (canvases.main) exportsTable.renderMain(canvases.main);
       if (canvases.minimap) exportsTable.renderMinimap(canvases.minimap);
@@ -297,9 +324,10 @@
 
   Sandbox.app = app;
 
-  app.attachCanvases = function (mainCtx, minimapCtx) {
+  app.attachCanvases = function (mainCtx, minimapCtx, mainElement) {
     canvases.main = mainCtx;
     canvases.minimap = minimapCtx;
+    canvases.mainElement = mainElement || (mainCtx && mainCtx.canvas) || null;
   };
 
   app.setPlaying = function (playing) {
@@ -433,7 +461,7 @@
         Sandbox.ui.init();
         Sandbox.client.attachInput(global, function (input) {
           link.post({ type: P().INPUT, dx: input.dx, dy: input.dy });
-        });
+        }, canvases.mainElement);
 
         // Hand the server its own reference copies for challenge/response.
         var sources = {};
@@ -452,6 +480,7 @@
         requestAnimationFrame(renderFrame);
 
         // Loaded last, on purpose. See the header of attacker.js.
+        boot('loading attacker.js (unsigned, cache-busted with v=' + CACHE_TOKEN + ')');
         return loadScriptTag('src/attacker.js');
       })
       .then(function () {

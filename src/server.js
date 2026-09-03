@@ -33,7 +33,14 @@
 
   if (IN_WORKER) {
     // Same-directory imports; the Worker is constructed with 'src/server.js'.
-    importScripts('rng.js', 'protocol.js', 'hash.js');
+    //
+    // The cache-busting token the loader put on this worker's own URL is
+    // forwarded to them. These three copies run inside the Worker and are never
+    // signature-checked - the verification in main.js covers the main thread's
+    // copies - so without this a browser could serve stale constants to the
+    // authoritative server while the client ran current code.
+    var v = (global.location && global.location.search) || '';
+    importScripts('rng.js' + v, 'protocol.js' + v, 'hash.js' + v);
   }
 
   var Sandbox = global.Sandbox = global.Sandbox || {};
@@ -338,9 +345,18 @@
 
     function movePlayer() {
       var step = PLAYER_SPEED / P.TICK_HZ;
-      var dx = state.input.dx * step;
-      var dy = state.input.dy * step;
-      if (dx !== 0 && dy !== 0) { dx *= 0.7071; dy *= 0.7071; }
+
+      // The client sends a direction, not a distance. Since the client owns its
+      // own look direction, that vector arrives already rotated into world
+      // space and can be any length the client feels like sending - so the
+      // server clamps it to unit length before applying the speed. Taking the
+      // client's magnitude on trust is the textbook speed-hack, and the fix is
+      // the same one this whole project is arguing for: validate on the side
+      // the adversary does not control.
+      var len = Math.sqrt(state.input.dx * state.input.dx + state.input.dy * state.input.dy);
+      var scale = len > 1 ? step / len : step;
+      var dx = state.input.dx * scale;
+      var dy = state.input.dy * scale;
 
       // Axis-separated collision so sliding along a wall feels normal.
       var nx = state.player.x + dx;
@@ -705,7 +721,13 @@
           break;
 
         case P.INPUT:
-          if (state) { state.input.dx = msg.dx; state.input.dy = msg.dy; }
+          // Sanitise on arrival. Everything crossing this boundary was written
+          // by code the adversary controls, including NaN and Infinity.
+          if (state) {
+            var idx = Number(msg.dx), idy = Number(msg.dy);
+            state.input.dx = isFinite(idx) ? idx : 0;
+            state.input.dy = isFinite(idy) ? idy : 0;
+          }
           break;
 
         case P.SET_CULLING:

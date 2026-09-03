@@ -95,17 +95,29 @@ body {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 18px;
+  gap: 8px 10px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 10px 14px;
 }
 
+/* Each group reads as one control rather than a row of loose widgets, which
+   matters when someone is driving this live in front of an audience. */
 .control-group {
   display: flex;
   align-items: center;
   gap: 6px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.018);
+  border: 1px solid transparent;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.control-group:hover {
+  background: rgba(255, 255, 255, 0.035);
+  border-color: var(--border);
 }
 
 .control-group.grow { margin-left: auto; }
@@ -117,7 +129,7 @@ input[type="text"], input[type="number"], select {
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 6px;
   padding: 5px 7px;
   font-family: var(--mono);
   font-size: 13px;
@@ -129,13 +141,25 @@ button {
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 6px;
   padding: 5px 11px;
   font-size: 13px;
   cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
 }
 
-button:hover:not(:disabled) { border-color: var(--accent); color: #fff; }
+/* Focus has to be visible. When it is invisible, a widget quietly holding the
+   keyboard looks identical to broken input. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: #fff;
+  background: rgba(94, 200, 242, 0.09);
+}
 button:disabled { opacity: 0.4; cursor: default; }
 
 #play-btn { min-width: 88px; }
@@ -189,13 +213,44 @@ button:disabled { opacity: 0.4; cursor: default; }
   padding: 12px;
 }
 
+/* The first-person view. The wrapper exists so the click-to-look prompt can sit
+   over the canvas without the canvas having to draw it. */
+.viewport {
+  position: relative;
+  line-height: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
 #game-canvas {
   width: 100%;
   height: auto;
   display: block;
-  border-radius: 4px;
-  background: #0b0e13;
+  background: #0a0d12;
+  cursor: crosshair;
 }
+
+#game-canvas.locked { cursor: none; }
+
+.lock-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 46px;
+  transform: translateX(-50%);
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(10, 13, 18, 0.78);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  letter-spacing: 0.2px;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+.lock-hint.hidden { opacity: 0; }
 
 #minimap-canvas {
   width: 100%;

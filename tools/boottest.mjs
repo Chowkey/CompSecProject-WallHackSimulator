@@ -41,9 +41,10 @@ function check(name, ok, detail) {
 
 const html = readFileSync(join(ROOT, 'index.html'), 'utf8');
 const HTML_IDS = [...html.matchAll(/id="([^"]+)"/g)].map((m) => m[1]);
-const CANVAS_SIZES = { 'game-canvas': [800, 600], 'minimap-canvas': [320, 240] };
+const CANVAS_SIZES = { 'game-canvas': [800, 500], 'minimap-canvas': [320, 240] };
 
 const scriptErrors = [];
+const scriptSrcs = [];
 const elements = new Map();
 
 function makeClassList() {
@@ -86,6 +87,7 @@ function makeElement(tag, id) {
     click() { this.dispatch('click', { target: this }); },
     scrollIntoView() {},
     focus() {},
+    blur() { this._blurred = (this._blurred || 0) + 1; },
     appendChild(child) { this.children.push(child); return child; },
     removeChild(child) {
       const i = this.children.indexOf(child);
@@ -108,7 +110,11 @@ function runScriptElement(el) {
     return;
   }
   if (el.src) {
-    readFile(join(ROOT, el.src), 'utf8', (err, source) => {
+    // Strip the loader's cache-busting query the way an HTTP server would
+    // before it resolves the path on disk.
+    scriptSrcs.push(String(el.src));
+    const path = String(el.src).split('?')[0];
+    readFile(join(ROOT, path), 'utf8', (err, source) => {
       if (err) { el.onerror && el.onerror(err); return; }
       try { runInThisContext(source); el.onload && el.onload(); }
       catch (e) { scriptErrors.push(e); el.onerror && el.onerror(e); }
@@ -257,6 +263,58 @@ check('STRICT: a fully evasive cheat gains nothing, with every defense off',
 try { drawFrame(); } catch (err) { scriptErrors.push(err); }
 check('minimap still renders with all five bypasses armed',
   scriptErrors.length === 0 || !scriptErrors.length);
+
+/* ====================================================================== *
+ * Keyboard focus
+ *
+ * Regression guard. The camera turns on the arrow keys, but a browser keeps a
+ * dropdown focused after it is used, and a focused widget swallows those keys
+ * - so touching any control silently disabled looking left and right. The
+ * controls must hand focus back to the page.
+ * ====================================================================== */
+
+/* ====================================================================== *
+ * Loader cache discipline
+ *
+ * Regression guard. Signed modules are fetched with cache: 'no-store' and then
+ * verified, so a stale one fails loudly. attacker.js and server.js are loaded
+ * by URL and are deliberately unsigned, so a stale copy of either would load
+ * silently and the page would look entirely healthy while running an older
+ * cheat. The unverified files are exactly the ones whose version cannot be
+ * taken on trust, which is Defense 4's argument turned on this project itself.
+ * ====================================================================== */
+
+console.log('\n\x1b[1mLoader cache discipline\x1b[0m');
+{
+  const attacker = scriptSrcs.filter((u) => u.indexOf('attacker.js') >= 0);
+  check('attacker.js is loaded with a cache-busting token',
+    attacker.length > 0 && attacker.every((u) => /[?&]v=\d+/.test(u)),
+    attacker[0] || 'attacker.js was never requested');
+}
+
+console.log('\n\x1b[1mKeyboard focus returns to the page\x1b[0m');
+{
+  // The handler is delegated to the #controls container and reads event.target,
+  // which is how a real bubbled change event arrives. This shim does not bubble,
+  // so the event is dispatched on the container with the widget as its target.
+  const controls = elements.get('controls');
+  const viewSelect = elements.get('view-select');
+  const cullingSelect = elements.get('culling-select');
+  controls.dispatch('change', { target: viewSelect });
+  controls.dispatch('change', { target: cullingSelect });
+  check('a used dropdown releases keyboard focus',
+    viewSelect._blurred > 0 && cullingSelect._blurred > 0,
+    `view-select blurred ${viewSelect._blurred || 0}x, culling-select ${cullingSelect._blurred || 0}x`);
+
+  // Turning must survive that round trip.
+  const before = S.clientState.camera.yaw;
+  S.clientState.camera.yaw = 0;
+  const keydown = (elements.get('view-select')._listeners.change || []).length;
+  S.client.updateCamera(16);
+  check('camera update runs without a focused control', typeof S.clientState.camera.yaw === 'number',
+    `${keydown} change listener(s) wired`);
+  S.clientState.camera.yaw = before;
+}
 
 /* ====================================================================== *
  * Benchmark (opt-in: it is the slow part)

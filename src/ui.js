@@ -207,13 +207,37 @@
     }
   }
 
+  /**
+   * Switch the main view between the first-person raycaster and the top-down
+   * map. Both are drawn by the same client function and from the same packet -
+   * the toggle changes presentation only, never what the client was told.
+   */
+  function setViewMode(mode) {
+    var applied = Sandbox.client.setViewMode(mode);
+    if (el.viewSelect) el.viewSelect.value = applied;
+    updateLockHint();
+    Log.client('view = ' + (applied === '3D' ? 'first person' : 'top down') +
+      ' — same packet, same data, different projection');
+    return applied;
+  }
+
+  // The click-to-look prompt only makes sense in the first-person view, and
+  // only while the pointer is free.
+  function updateLockHint() {
+    if (!el.lockHint || !el.lockHint.classList) return;
+    var wanted = Sandbox.clientState.viewMode === '3D' &&
+      !(Sandbox.client.isPointerLocked && Sandbox.client.isPointerLocked());
+    el.lockHint.classList.toggle('hidden', !wanted);
+  }
+
   function buildLegend() {
+    // Both views use these colours, so the legend describes both at once.
     var items = [
       ['visible', 'Visible — legitimate line of sight'],
       ['leaked', 'Leaked — sent early by the 300ms buffer'],
-      ['wallhack', 'Wallhack — revealed only by the cheat'],
+      ['wallhack', 'Wallhack — drawn through walls by the cheat'],
       ['lastKnown', 'Last known position'],
-      ['player', 'You']
+      ['player', 'You — the wedge is where you are looking']
     ];
     el.legend.innerHTML = '';
     items.forEach(function (item) {
@@ -298,8 +322,39 @@
     el.playBtn.classList.toggle('is-playing', playing);
   }
 
+  /**
+   * Hand keyboard focus back to the page after a control has been used.
+   *
+   * Without this the browser keeps the dropdown or checkbox focused, and the
+   * arrow keys go to that widget instead of turning the camera - so the player
+   * silently stops being able to look left and right the moment anyone touches
+   * the control bar. The seed field is exempt while it is being typed into.
+   */
+  function releaseFocus(node, force) {
+    if (!node || typeof node.blur !== 'function') return;
+    // The seed field keeps focus while it is being typed into, unless the user
+    // explicitly asked to leave it with Enter or Escape.
+    if (!force && node.tagName === 'INPUT' && node.type === 'text') return;
+    node.blur();
+  }
+
+  function wireFocusRelease(container) {
+    if (!container || !container.addEventListener) return;
+    container.addEventListener('change', function (event) {
+      releaseFocus(event.target);
+    });
+    container.addEventListener('click', function (event) {
+      if (event.target && event.target.tagName === 'BUTTON') releaseFocus(event.target);
+    });
+  }
+
   function wireControls() {
     el.seedInput.value = Sandbox.app.seed;
+
+    // Both regions carry widgets that would otherwise keep focus: the control
+    // bar's dropdowns, and the defense panel's enable/bypass checkboxes.
+    wireFocusRelease(el.controls);
+    wireFocusRelease(el.defensePane);
 
     el.playBtn.addEventListener('click', function () {
       setPlaying(!Sandbox.app.playing);
@@ -312,6 +367,10 @@
 
     el.speedSelect.addEventListener('change', function () {
       Sandbox.app.setSpeed(parseFloat(el.speedSelect.value));
+    });
+
+    el.viewSelect.addEventListener('change', function () {
+      setViewMode(el.viewSelect.value);
     });
 
     el.cullingSelect.addEventListener('change', function () {
@@ -367,10 +426,27 @@
     });
 
     global.addEventListener('keydown', function (event) {
-      if (event.target && /^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName)) return;
+      // Escape is handled before the focus guard on purpose: it is the way out
+      // when a widget has hold of the keyboard, so it has to work precisely in
+      // the case where every other shortcut is being swallowed.
+      if (event.key === 'Escape') {
+        el.modal.classList.remove('open');
+        releaseFocus(event.target, true);
+        return;
+      }
+      // Same narrow rule the movement keys use: only step aside for an element
+      // that genuinely needs this key, not for any focused widget at all.
+      if (Sandbox.client.claimsKey(event.target, event.key)) {
+        // Committing the seed field should hand the keyboard back to the game.
+        if (event.key === 'Enter') releaseFocus(event.target, true);
+        return;
+      }
       if (event.key === ' ') { event.preventDefault(); el.playBtn.click(); }
       if (event.key === '.') { event.preventDefault(); el.stepBtn.click(); }
-      if (event.key === 'Escape') el.modal.classList.remove('open');
+      if (event.key === 'v' || event.key === 'V') {
+        event.preventDefault();
+        setViewMode(Sandbox.clientState.viewMode === '3D' ? '2D' : '3D');
+      }
     });
   }
 
@@ -411,9 +487,11 @@
 
   function init() {
     [
+      'controls', 'defense-pane',
       'env-line', 'banner', 'game-canvas', 'game-caption', 'minimap-canvas', 'legend',
       'leak-readout', 'defense-list', 'terminal', 'terminal-filters', 'conclusion',
       'seed-input', 'random-seed', 'reset-btn', 'play-btn', 'step-btn', 'speed-select',
+      'view-select', 'lock-hint',
       'culling-select', 'culling-help', 'attacker-select', 'overhead-range',
       'overhead-value', 'timing-box', 'export-btn', 'bench-btn', 'bench-cancel',
       'bench-ticks', 'bench-progress', 'bench-bar', 'bench-label', 'clear-log',
@@ -439,6 +517,7 @@
     setInterval(function () {
       renderDefensePanel();
       renderReadouts();
+      updateLockHint();
     }, 250);
   }
 

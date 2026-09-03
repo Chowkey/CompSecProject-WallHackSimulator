@@ -58,6 +58,14 @@
     </div>
 
     <div class="control-group">
+      <label for="view-select">View</label>
+      <select id="view-select">
+        <option value="3D" selected>3D — first person</option>
+        <option value="2D">2D — top down</option>
+      </select>
+    </div>
+
+    <div class="control-group">
       <label for="culling-select">Culling</label>
       <select id="culling-select">
         <option value="NONE">NONE — send everything</option>
@@ -104,10 +112,14 @@
 
   <main id="stage">
     <section id="game-pane">
-      <canvas id="game-canvas" width="800" height="600"></canvas>
+      <div class="viewport">
+        <canvas id="game-canvas" width="800" height="500"></canvas>
+        <div id="lock-hint" class="lock-hint">press <kbd>F</kbd> or click for mouse look · <kbd>Esc</kbd> releases</div>
+      </div>
       <p id="game-caption" class="mono caption">waiting for the server…</p>
-      <p class="hint">Move with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or the arrow keys ·
-        <kbd>Space</kbd> play/pause · <kbd>.</kbd> single step</p>
+      <p class="hint"><kbd>W</kbd><kbd>S</kbd> forward/back · <kbd>A</kbd><kbd>D</kbd> strafe ·
+        <kbd>Q</kbd><kbd>E</kbd> or <kbd>←</kbd><kbd>→</kbd> turn · <kbd>F</kbd> mouse look ·
+        <kbd>V</kbd> switch view · <kbd>Space</kbd> play/pause · <kbd>.</kbd> single step</p>
     </section>
 
     <aside id="side">

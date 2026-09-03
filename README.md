@@ -56,19 +56,28 @@ trusted side), and `attacker.js` (it is the intruder — signing it would defeat
 
 Roughly eight minutes, in the order that builds the argument.
 
-1. **Baseline.** Press Play. Move with `WASD`. Watch the minimap: green NPCs appear only in
-   line of sight. `Space` pauses, `.` advances one tick — use it to freeze on any moment.
+1. **Baseline.** Press Play. `W`/`S` move, `A`/`D` strafe, `Q`/`E` or `←`/`→` turn, `F`
+   toggles mouse look. The HUD shows the heading in degrees, so it is obvious whether the
+   camera is responding. Green figures appear only when you actually have line of sight to them,
+   and the minimap wedge shows where you are facing. `Space` pauses, `.` advances one tick —
+   use it to freeze on any moment. `V` switches to the top-down map if the committee wants to
+   see the geometry the first-person view is drawn from.
 
-2. **The naive architecture.** Set Culling to `NONE`, Attacker to `2 — wallhack`. Red dots
-   appear through walls, with sight lines drawn to them. No defense is enabled yet, and none
-   would help: the server already handed over the data.
+2. **The naive architecture.** Set Culling to `NONE`, Attacker to `2 — wallhack`. A
+   conventional ESP overlay appears in the first-person view: bracketed bounding boxes,
+   tracer lines from the bottom of the screen, and a range readout on each target — with red
+   silhouettes standing *inside the walls you are looking at*. No defense is enabled yet, and
+   none would help: the server already handed over the data.
 
 3. **The architectural fix.** Leave the cheat running. Switch Culling to `STRICT`. The red
-   dots vanish permanently. The readout under the minimap shows the cheat now receives zero
-   hidden positions. **Still no defense is enabled.**
+   silhouettes and their tracers vanish permanently. Say this part out loud: the overlay has
+   not been switched off — it is still installed, still hooked, still drawing every frame, and
+   the only targets it can box are ones the player could already see unaided. It has been
+   starved, not stopped. The readout under the minimap shows zero hidden positions received.
+   **Still no defense is enabled.**
 
-4. **The realistic architecture.** Switch to `BUFFERED`. Yellow dots appear — NPCs the server
-   sent up to 300 ms early to avoid pop-in. The readout shows the percentage of ticks
+4. **The realistic architecture.** Switch to `BUFFERED`. Yellow figures appear — NPCs the
+   server sent up to 300 ms early to avoid pop-in. The readout shows the percentage of ticks
    affected and the mean advance warning. This is the attack surface that survives culling,
    and it is the price of a smooth client.
 
@@ -98,7 +107,7 @@ src/
   hash.js           SHA-256 / HMAC-SHA256, Web Crypto with a pure-JS fallback
   main.js           loader, module table, scoring oracle, main loop
   server.js         authoritative server (Web Worker): map, LOS, culling, challenges
-  client.js         packet ingest, game view, fog-of-war minimap
+  client.js         packet ingest, first-person raycaster, fog-of-war minimap
   defenses.js       the five checks, their baselines, and the scoring runner
   attacker.js       three attacker levels and five bypass techniques
   ui.js             controls, defense panel, terminal, modals
@@ -148,16 +157,39 @@ sequence — fetch, verify every signature, execute only what verified, wire the
 the server, install a cheat and render through it — so a broken element reference or a stale
 manifest fails at the command line rather than in front of the committee.
 
+## A loader bug that turned into a finding
+
+`attacker.js` and `server.js` are the two files loaded by URL rather than fetched and verified,
+because they are deliberately unsigned — the intruder and the trusted server respectively.
+That also made them the two files a browser could quietly serve from cache. The symptom was
+a page that looked completely healthy: every signature verified, the client rendered current
+code, and only the cheat behaved like an older build of itself, because the browser had reused
+a cached `attacker.js`.
+
+The verified modules could not fail this way. A stale copy of one is caught by its HMAC
+immediately and loudly. **The file nobody verifies is the file whose version nobody can be
+sure of** — Defense 4's argument landing on this project's own loader. Both are now loaded
+with a per-page-load cache-busting token, and `tools/boottest.mjs` asserts it.
+
 ## Two findings worth putting in the report
 
 Both came out of the measurements rather than being designed in.
 
-**Challenge–response detection is a coverage fraction, not a certainty.** Each challenge
-covers one random slice of one random module, so an unprepared hook is caught roughly **17%**
-of the time per challenge — reliably within a session (first detection typically on the
-second or third challenge), unreliably in any single check. This is the general behaviour of
-every rotating partial integrity check, including production ones that hash a subset of
-`.text` per pass.
+**Challenge–response detection is a coverage fraction, and the attacker sets it.** Each
+challenge covers one random slice of one random module, so an unprepared hook is caught only
+when the slice happens to sample the bytes that changed — reliably within a session (first
+detection typically on the first or second challenge), unreliably in any single check. This
+is the general behaviour of every rotating partial integrity check, including production ones
+that hash a subset of `.text` per pass.
+
+The rate is worth reading carefully, because it is a property of the *cheat's footprint*
+rather than of the defense. An earlier build of this sandbox hooked a single render function
+and measured **~17%** per challenge. Adding the first-person view meant the cheat had to hook
+a second function to reach it, and the measured rate roughly doubled to **~37%** — with the
+challenge length, the module set and the defense itself completely unchanged. The defender
+does not get to pick this number. A cheat that touches less code is proportionally harder for
+any partial integrity check to catch, which is a direct argument for keeping the *sensitive*
+surface small rather than for hashing more of it.
 
 **The timing threshold is set by network noise, not by the cheat.** The server adds simulated
 round-trip jitter (`NETWORK_JITTER_MS` in `src/protocol.js`, default 8 ms) before z-scoring,

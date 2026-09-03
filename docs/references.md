@@ -169,7 +169,7 @@ VBS/HVCI/TPM attestation, and conference papers on game security.
 
 ## 6. Suggested extensions for the discussion
 
-Three questions the sandbox can quantify directly, which are not well covered in the
+Five questions the sandbox can quantify directly, which are not well covered in the
 existing literature:
 
 1. **Buffer width versus cheat advantage.** Sweep the lookahead from 0 to 500 ms and measure
@@ -186,3 +186,23 @@ existing literature:
 3. **Computational cost of culling as player count grows.** Measure per-tick time as N
    increases, comparing pure raycasting against a cached-occluder approach — and compare
    against CornerCulling's published figures.
+
+4. **Frustum culling, and why this sandbox deliberately does not do it.** Since the
+   first-person view was added, the client owns a heading, and the server could cull to the
+   player's field of view as well as to line of sight — sending strictly less data again. It
+   does not, for two reasons worth stating in the report. The measurement reason: every
+   figure quoted here was taken without it, and adding it would silently change all of them.
+   The security reason is the more interesting one. Frustum culling requires the server to
+   believe the client's claim about where it is looking, and that claim is exactly the kind
+   of self-report this project argues cannot be trusted — a cheat would simply report a
+   rotating heading and receive the whole map a slice at a time. Line-of-sight culling needs
+   only the player's position, which the server already owns. **A culling rule is only as
+   trustworthy as the least trustworthy input it consumes**, which is why shipped
+   implementations cull on position and not on view direction.
+
+5. **Cheat footprint versus partial-check coverage.** The per-challenge detection rate
+   measured here is the fraction of the module the attacker modified, not a property of the
+   defense: going from one hooked render function to two moved it from ~17% to ~37% with the
+   check unchanged (see `README.md`). Sweep the number of hooked functions against detection
+   rate per challenge, and the result is a straight line the defender does not control. It
+   argues for reducing the sensitive surface rather than for hashing more of it per pass.
