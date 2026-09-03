@@ -52,7 +52,9 @@
 
   var settings = {
     level: 0,
-    overheadMs: 0
+    // Fixed demonstration cost for serving challenge data from the pristine
+    // cache. The benchmark overrides this with its own 0-50 ms sweep.
+    overheadMs: 40
   };
 
   var installed = {

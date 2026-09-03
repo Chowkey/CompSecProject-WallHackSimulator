@@ -642,3 +642,372 @@ kbd {
   #stage { grid-template-columns: minmax(0, 1fr); }
   .env { text-align: left; }
 }
+
+/* --- visual system refresh ------------------------------------------- */
+
+:root {
+  --bg: #0e151d;
+  --bg-soft: #131e28;
+  --panel: rgba(22, 32, 42, 0.97);
+  --panel-2: #1d2a36;
+  --panel-3: #263645;
+  --border: #344654;
+  --border-bright: #4b6475;
+  --text: #f0f4f6;
+  --muted: #9aaab5;
+  --accent: #83b6c9;
+  --accent-soft: rgba(131, 182, 201, 0.13);
+  --visible: #68bd8e;
+  --leaked: #dfb65f;
+  --wallhack: #df7078;
+  --lastknown: #8998a3;
+  --shadow: 0 10px 28px rgba(2, 8, 14, 0.28);
+  --radius: 12px;
+  --ui-font: "Aptos", "Segoe UI", "Trebuchet MS", sans-serif;
+}
+
+html { min-width: 320px; background: var(--bg); }
+
+body {
+  background:
+    radial-gradient(circle at 12% -8%, rgba(71, 120, 145, 0.18), transparent 30rem),
+    radial-gradient(circle at 100% 18%, rgba(65, 91, 115, 0.13), transparent 28rem),
+    linear-gradient(145deg, #0e151d 0%, #111b24 52%, #0c131a 100%);
+  color: var(--text);
+  font-family: var(--ui-font);
+}
+
+#app {
+  max-width: 1680px;
+  padding: 24px clamp(14px, 3vw, 40px) 30px;
+  gap: 16px;
+}
+
+#topbar {
+  position: relative;
+  padding: 10px 4px 18px;
+  border-bottom: 1px solid rgba(131, 182, 201, 0.24);
+}
+
+#topbar::after { display: none; }
+
+#topbar h1 {
+  font-size: clamp(21px, 2.1vw, 30px);
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+}
+
+.project-overview { flex: 1 1 720px; }
+.eyebrow {
+  margin: 0 0 5px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.subtitle { margin-top: 8px; color: #9aaac0; font-size: 13px; }
+.env { color: var(--accent); opacity: 0.9; }
+
+.quick-start {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: quick-step;
+}
+.quick-start li {
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid rgba(131, 182, 201, 0.18);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--muted);
+  font-size: 12px;
+}
+.quick-start strong { color: var(--text); font-weight: 650; }
+
+#controls,
+#game-pane, #minimap-pane, #defense-pane, #terminal-pane, .conclusion {
+  background: linear-gradient(145deg, rgba(19, 27, 42, 0.96), rgba(12, 17, 28, 0.96));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+#controls {
+  gap: 9px;
+  padding: 12px;
+  border-color: rgba(131, 182, 201, 0.24);
+}
+
+.primary-actions { border-color: rgba(131, 182, 201, 0.28); }
+
+.advanced-tools {
+  flex: 1 0 100%;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 8px;
+}
+.advanced-tools-title {
+  width: fit-content;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.advanced-tools-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-top: 9px;
+}
+.advanced-tools .control-group.grow { margin-left: 0; }
+
+/* Seed is an implementation detail for repeatable experiments, not a user
+   control in the simplified interface. Keep the elements available to the
+   existing reset logic, but remove them from the visual toolbar. */
+#controls label[for="seed-input"],
+#controls #seed-input,
+#controls #random-seed { display: none; }
+
+/* The benchmark uses its tested 500-tick default; exposing this value adds a
+   choice without helping the normal wallhack demonstration. */
+#controls label[for="bench-ticks"],
+#controls #bench-ticks { display: none; }
+
+.control-group {
+  min-height: 38px;
+  padding: 5px 9px;
+  background: rgba(255, 255, 255, 0.018);
+  border-color: rgba(255, 255, 255, 0.035);
+  border-radius: 10px;
+}
+
+.control-group:hover { background: rgba(255, 255, 255, 0.03); border-color: rgba(131, 182, 201, 0.24); }
+label { color: #aebbc5; font-weight: 600; }
+
+input[type="text"], input[type="number"], select {
+  background: #17232e;
+  border-color: #405666;
+  border-radius: 8px;
+  min-height: 28px;
+}
+
+/* Native selects keep their existing behavior, but use a quieter custom
+   chevron so the browser's default control does not clash with the palette. */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  min-width: 150px;
+  padding: 7px 34px 7px 11px;
+  color: var(--text);
+  cursor: pointer;
+  background-color: #17232e;
+  background-image: linear-gradient(45deg, transparent 50%, #aebbc5 50%),
+    linear-gradient(135deg, #aebbc5 50%, transparent 50%);
+  background-position: calc(100% - 16px) 50%, calc(100% - 11px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+select:hover { background-color: #20303d; border-color: #638196; }
+
+select:focus {
+  background-image: linear-gradient(45deg, transparent 50%, var(--accent) 50%),
+    linear-gradient(135deg, var(--accent) 50%, transparent 50%);
+}
+
+select option {
+  background: #17232e;
+  color: var(--text);
+}
+
+select::-ms-expand { display: none; }
+
+/* The visible control is custom so its option list can be rounded too. The
+   original select remains in the DOM as the source of truth for the app. */
+.custom-select { position: relative; min-width: 150px; }
+.custom-select > select {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.custom-select-trigger {
+  width: 100%;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 7px 11px;
+  color: var(--text);
+  background: #22313e;
+  border: 1px solid #405666;
+  border-radius: 9px;
+  font: 13px var(--mono);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.custom-select-trigger::after {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid #aebbc5;
+  border-bottom: 2px solid #aebbc5;
+  transform: rotate(45deg) translateY(-2px);
+}
+.custom-select.open .custom-select-trigger,
+.custom-select-trigger:hover {
+  background: #2a3b49;
+  border-color: #638196;
+}
+.custom-select-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  display: none;
+  padding: 5px;
+  background: #1b2833;
+  border: 1px solid #4b6475;
+  border-radius: 11px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+}
+.custom-select.open .custom-select-menu { display: grid; gap: 2px; }
+.custom-select-option {
+  padding: 8px 9px;
+  border-radius: 7px;
+  color: var(--text);
+  font: 13px var(--mono);
+  cursor: pointer;
+}
+.custom-select-option:hover,
+.custom-select-option.is-selected { background: rgba(131, 182, 201, 0.16); color: #b8d9e5; }
+.custom-select-option:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+@media (max-width: 760px) {
+  select, .custom-select { min-width: 0; flex: 1; }
+}
+
+input[type="text"]:focus, input[type="number"]:focus, select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(131, 182, 201, 0.13);
+  outline: none;
+}
+
+button {
+  background: #263744;
+  border-color: #405968;
+  border-radius: 9px;
+  padding: 6px 12px;
+  font-weight: 550;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.18);
+}
+
+button:hover:not(:disabled) { background: #314654; border-color: #78a2b5; }
+button:active:not(:disabled) { transform: translateY(1px); box-shadow: none; }
+#play-btn { background: #315f73; border-color: #6798ad; color: #f5fbfd; }
+#play-btn.is-playing { background: rgba(70, 227, 154, 0.13); }
+
+#stage { gap: 16px; grid-template-columns: minmax(0, 1fr) 380px; }
+#game-pane, #minimap-pane, #defense-pane, #terminal-pane, .conclusion { padding: 16px; }
+#game-pane { border-color: rgba(131, 182, 201, 0.3); }
+
+.viewport {
+  border-color: var(--border-bright);
+  border-radius: 9px;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.03), 0 0 0 1px rgba(0,0,0,0.3);
+}
+
+#game-canvas { background: #070b12; }
+#minimap-canvas, #inspector-canvas { border-color: var(--border-bright); box-shadow: inset 0 0 28px rgba(0,0,0,0.28); }
+
+h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #c2ced6;
+  font-size: 12px;
+  letter-spacing: 0.11em;
+}
+
+h2::before { display: none; }
+
+.caption { color: var(--accent); }
+.hint { color: #718199; }
+kbd { background: #121b2a; border-color: #30445f; color: #c4d3e8; }
+
+.readout { border-top-color: var(--border); }
+.readout-note { border-left-color: var(--visible); background: rgba(70, 227, 154, 0.08); }
+
+.defense-row {
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.018);
+}
+.defense-row + .defense-row { margin-top: 5px; }
+.defense-row.is-bypassed { box-shadow: inset 3px 0 var(--wallhack); }
+.defense-row.is-detecting { box-shadow: inset 3px 0 var(--visible); }
+
+#terminal-pane { padding-top: 12px; }
+#terminal-toolbar { margin-bottom: 11px; padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+.pane-tab { border-radius: 7px; }
+.pane-tab.is-active { color: var(--accent); border-color: rgba(131, 182, 201, 0.38); background: var(--accent-soft); }
+
+.terminal {
+  height: 320px;
+  background: #060910;
+  border-color: #263750;
+  border-radius: 8px;
+  padding: 12px 14px;
+  box-shadow: inset 0 0 30px rgba(0,0,0,0.32);
+}
+
+.log-line { gap: 10px; padding: 1px 0; }
+.log-time { color: #53647b; }
+.log-badge { border-radius: 999px; }
+
+.conclusion { border-color: rgba(70, 227, 154, 0.24); }
+.conclusion h2 { color: var(--text); }
+.footer { padding: 4px 4px 6px; color: #6e7d93; }
+
+.modal {
+  background: rgba(8, 17, 25, 0.28);
+  backdrop-filter: blur(2px);
+}
+.modal-box {
+  background: rgba(20, 30, 40, 0.98);
+  border-color: var(--border-bright);
+  border-radius: 14px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.34);
+  max-width: 680px;
+}
+
+@media (max-width: 1100px) {
+  #stage { grid-template-columns: minmax(0, 1fr); }
+  .env { text-align: left; }
+}
+
+@media (max-width: 760px) {
+  #app { padding: 14px 10px 22px; gap: 12px; }
+  #topbar { padding-top: 4px; }
+  .quick-start { grid-template-columns: 1fr; }
+  #controls { align-items: stretch; }
+  .control-group, .control-group.grow { margin-left: 0; flex: 1 1 230px; }
+  #stage { grid-template-columns: minmax(0, 1fr); }
+  #game-pane, #minimap-pane, #defense-pane, #terminal-pane, .conclusion { padding: 12px; }
+  .lock-hint { max-width: calc(100% - 24px); text-align: center; }
+  .terminal { height: 260px; font-size: 11px; }
+}
