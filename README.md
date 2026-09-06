@@ -278,40 +278,6 @@ immediately and loudly. **The file nobody verifies is the file whose version nob
 sure of** — Defense 4's argument landing on this project's own loader. Both are now loaded
 with a per-page-load cache-busting token, and `tools/boottest.mjs` asserts it.
 
-## Two findings worth putting in the report
-
-Both came out of the measurements rather than being designed in.
-
-**Challenge–response detection is a coverage fraction, and the attacker sets it.** Each
-challenge covers one random slice of one random module, so an unprepared hook is caught only
-when the slice happens to sample the bytes that changed — reliably within a session (first
-detection typically on the first or second challenge), unreliably in any single check. This
-is the general behaviour of every rotating partial integrity check, including production ones
-that hash a subset of `.text` per pass.
-
-The rate is worth reading carefully, because it is a property of the *cheat's footprint*
-rather than of the defense. An earlier build of this sandbox hooked a single render function
-and measured **~17%** per challenge. Adding the first-person view meant the cheat had to hook
-a second function to reach it, and the measured rate roughly doubled to **~37%** — with the
-challenge length, the module set and the defense itself completely unchanged. The defender
-does not get to pick this number. A cheat that touches less code is proportionally harder for
-any partial integrity check to catch, which is a direct argument for keeping the *sensitive*
-surface small rather than for hashing more of it.
-
-**The timing threshold is set by network noise, not by the cheat.** The server adds simulated
-round-trip jitter (`NETWORK_JITTER_MS` in `src/protocol.js`, default 8 ms) before z-scoring,
-because without it the sandbox would be measuring a same-machine function call and the
-detector would look far stronger than it is in production. The sweep then produces a real
-curve rather than a step:
-
-| Cheat overhead | 0–8 ms | 20 ms | 30 ms | 40 ms+ |
-|---|---|---|---|---|
-| Detection rate | 0% | 25% | 75% | 100% |
-
-A cheat whose overhead is small relative to normal network variance is invisible to this
-technique no matter how careful the statistics are. Raising the z threshold to protect
-players on bad connections directly raises the overhead a cheat is allowed to spend.
-
 ## Reproducibility
 
 Every random decision comes from a seeded `mulberry32` stream, so a given seed always
