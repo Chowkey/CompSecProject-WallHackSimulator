@@ -24,7 +24,7 @@ sandbox.
 ## Running it
 
 ```bash
-cd /Users/doancongpho/Desktop/Security
+cd CompSecProject-WallHackSimulator   # the repository root
 python3 -m http.server 8000
 ```
 
@@ -53,6 +53,17 @@ node tools/sign.mjs
 Files under `src/` that are deliberately **not** signed: `hash.js` and `main.js` (they are
 the loader, and a verifier cannot verify itself), `server.js` (it runs in the Worker, on the
 trusted side), and `attacker.js` (it is the intruder — signing it would defeat the point).
+
+### Why the signing key is public
+
+`manifest.json` ships the HMAC key in plain text (`client-integrity-sandbox/v1/demo-key`).
+That is deliberate, not a leak. The loader that checks the signatures runs on the client, so
+it needs the key on the client, and anything on the client belongs to the attacker. Anyone
+can re-sign a modified module with it. Hiding the key better would only make it harder to find.
+It would still be on the machine. Real code signing avoids this with asymmetric keys:
+the publisher keeps the private key and the client only holds the public one. Even then, the
+check shows only that the *file* is authentic. It says nothing about the code in memory
+afterwards, and that is the point Defense 4 makes.
 
 ---
 
